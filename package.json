@@ -1,0 +1,33 @@
+{
+  "name": "ve_bms_forecast",
+  "version": "0.0.1",
+  "description": "Battery management with forecast",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MarkusRJK/ve_bms_forecast.git"
+  },
+  "keywords": [
+    "Raspberry PI",
+    "Battery management",
+    "Node.js",
+    "MPPT",
+    "BMV",
+    "Ve.direct",
+    "forecast"
+  ],
+  "dependencies": {
+    "date": "^1.0.2",
+    "mathjs": "^5.1.0",
+    "moment": "^2.22.2",
+    "serialport": "~4.0.0",
+    "terminal-kit": "~0.24.0"
+  },
+  "author": {
+    "name": "Markus Kohler <Markus.Kohler@udo.edu>"
+  },
+  "scripts": {
+    "start": "node test.js"
+  },
+  "license": "MIT"
+}
