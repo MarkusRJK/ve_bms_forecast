@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "description": "Battery management with forecast",
   "main": "index.js",
-  "repository": {
+  "_repository": {
     "type": "git",
     "url": "https://github.com/MarkusRJK/ve_bms_forecast.git"
   },
@@ -13,21 +13,30 @@
     "Node.js",
     "MPPT",
     "BMV",
+    "Phoenix Inverter",
     "Ve.direct",
     "forecast"
   ],
   "dependencies": {
+    "@types/express": "^4.17.1",
     "date": "^1.0.2",
+    "express": "^4.17.1",
+    "log4js": "^2.0.0",
     "mathjs": "^5.1.0",
     "moment": "^2.22.2",
     "serialport": "~4.0.0",
-    "terminal-kit": "~0.24.0"
+    "terminal-kit": "~0.24.0",
+    "ts-node-dev": "^1.0.0-pre.43",
+    "typescript": "^3.6.4"
   },
   "author": {
     "name": "Markus Kohler <Markus.Kohler@udo.edu>"
   },
   "scripts": {
-    "start": "node test.js"
+    "start": "node test.js",
+    "tsc": "tsc",
+    "socdev": "ts-node-dev --respawn --transpileOnly ./soc_estimator-testTS.ts",
+    "socprod": "tsc soc_estimator-testTS.ts && node ./build/soc_estimator-testTS.js"
   },
   "license": "MIT"
 }
