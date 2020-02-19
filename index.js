@@ -10,6 +10,7 @@
 // - first parse: parse until checksum ok then create objects from it for cache - only then do the up/download of config
 // - further parse: replace callback function by final parse function to do updates
 // - register function has switch statement to create each object after each other (only those appearing in update packet)
+// - add a on function for CHECKSUM that sends collection of all changes
 // - remove map key from objects and do it like addressCache
 // - iterate over bmvdata rather than map as bmvdata shall have all entries
 // - response from BMV to set command: also compare returned value
