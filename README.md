@@ -7,9 +7,26 @@ $ npm install
 ```
 
 ### Example
-Don't forget to configure the correct serialport for your BMV in test.js
+Get an example running in minutes:
+
+1. make an empty directory
+2. call
 ```
-$ nodejs test.js
+$ npm init
+```
+3. call
+```
+npm install git+https://git@github.com/MarkusRJK/ve_bms_forecast.git
+```
+4. copy an example from subdirectory
+```
+node_modules/ve_bms_forecast/examples
+```
+to your directory
+5. configure the serial port to which your BMV is connected
+6. run the code, e.g.
+```
+$ nodejs bmv-terminal.js
 ```
 
 ### Usage

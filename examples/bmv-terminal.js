@@ -6,7 +6,7 @@
 
 const Math = require('mathjs');
 var term = require( 'terminal-kit' ).terminal;
-var vedirect = require( './index.js' );
+var vedirect = require( 've_bms_forecast' );
 var fs = require('fs');
 var log4js = require('log4js');
 //var config_file = fs.createWriteStream(__dirname + '/config.json', {flags: 'w'});
