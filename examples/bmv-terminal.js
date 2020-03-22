@@ -6,7 +6,9 @@
 
 const Math = require('mathjs');
 var term = require( 'terminal-kit' ).terminal;
-var vedirect = require( 've_bms_forecast' );
+// ES6: import * as vedirect from 've_bms_forecast'
+const vedirect = require( 've_bms_forecast' ).VitronEnergyDevice;
+
 var fs = require('fs');
 var log4js = require('log4js');
 //var config_file = fs.createWriteStream(__dirname + '/config.json', {flags: 'w'});
@@ -27,10 +29,6 @@ var avgBaseCurrentLowVoltage = 660; // mA
 var inverterBaseCurrent = 5590 - avgBaseCurrentLowVoltage; // mA
 
 var bmvdata = {};
-
-//vedirect.open('/dev/ttyBMV0');
-//vedirect.open('/dev/ttyUSB0');
-vedirect.open('/dev/serial/by-id/usb-VictronEnergy_BV_VE_Direct_cable_VE1SUT80-if00-port0');
 
 
 function terminate()

@@ -18,15 +18,22 @@ logger.level = 'debug';
 
 // Data model:
 //
-// Each value (volt, current, power, state of charge...) owns a register
-// on the device. All registers are cached in this application's objects
+// Each value (volt, current, power, state of charge...) in this device
+// cache owns a register on the Vitron Energy device.
+//
+// All registers are cached in this application's objects
 // that also provide conversions, formatters, units, callbacks on change,
 // descriptions etc.
+//
 // Some of these register values are bundled into a package and send
 // every 1 second (1-second-updates). Among them are the history values
 // (H1, H2, ...) and the most important values like voltage, current,
 // power, state of charge.
 //
+// If a register value is send in the 1-second-update the value may
+// be by a factor different from the value read directly from the
+// register (e.g. ...)
+// 
 // For convenience there are 3 maps pointing to the same objects:
 //
 // addressCache: maps addresses of device registers to objects,
