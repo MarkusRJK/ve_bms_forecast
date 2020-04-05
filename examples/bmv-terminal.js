@@ -459,7 +459,7 @@ var soc_log = fs.createWriteStream('/var/log/soc.log', {flags: 'a'});
 var displayFunction = displayCurrentAndHistory;
 
 var current_function_log = fs.createWriteStream('/var/log/current_plot.log', {flags: 'a'});
-var currentListener = function(newCurrent, oldCurrent, precision)
+var currentListener = function(newCurrent, oldCurrent, precision, timestamp)
 {
     var date = new Date();
     current_function_log.write(date.getTime() / 1000 + '\t' +  newCurrent + '\n');

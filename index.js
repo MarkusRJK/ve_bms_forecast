@@ -5,6 +5,7 @@
 //'use strict';
 
 // TODO:
+// - fix: logs are empty after introducing class Vitodron...
 // - cope with unplugged cable:
 //    events.js:183
 //      throw er; // Unhandled 'error' event
@@ -24,6 +25,9 @@
 // - response from BMV to set command: also compare returned value
 // - make address class that handles adresses for display and use (endian swapping)
 // - make on a list so many callbacks can be called: callbacks = []; callback.push(..); callback.find(x)
+// - add timestamp when new package arrives
+// - ensure setTimeout within class works
+// - classes for CmdChecksum, Address, MessageQ
 
 const Math = require('mathjs');
 var fs = require('fs');
@@ -88,6 +92,13 @@ logger.debug("Service started at " + date.toLocaleString('en-GB', { timeZone: 'U
 //                    will be written to map['V'].value and
 //               maps contains more values than contained in the packages
 
+// Protocol on BMV 702:
+//
+// There are 2 periodic frames arriving at the serial port:
+// 1. Frame with PID, V, VM, DM, I, P, CE, SOC, TTG, Alarm, Relay, AR,
+//    BMV and FW + Checksum
+// 2. Frame with H1-H18 + Checksum
+
 // bmvdata maps human readable keys to objects
 var bmvdata = deviceCache.bmvdata;
 // map's keys correspond to the keys used in the frequent 1-second-updates
@@ -142,295 +153,83 @@ const cmdMaxRetries = 3;
 //       are not delivered with the 1-second-update package. I.e.
 //       the following:
 
+// var checksum = 0;
 
-const getBatteryCapacity = function()
-{
-    logger.debug("getBatteryCapacity");
-    get("0x1000");
-}
+// function updateChecksum(line) {
+//     let res = line.split("\t");
 
-
-const getChargedVoltage = function()
-{
-    logger.debug("getChargedVoltage");
-    get("0x1001");
-}
-
-const getTailCurrent = function()
-{
-    logger.debug("getTailCurrent");
-    get("0x1002");
-}
-
-const getChargedDetectTime = function ()
-{
-    logger.debug("getChargedDetectTime");
-    get("0x1003");
-}
-
-const getChargeEfficiency = function ()
-{
-    logger.debug("getChargeEfficiency");
-    get("0x1004");
-}
-
-const getPeukertCoefficient = function ()
-{
-    logger.debug("getPeukertCoefficient");
-    get("0x1005");
-}
-
-const getCurrentThreshold = function ()
-{
-    logger.debug("getCurrentThreshold");
-    get("0x1006");
-}
-
-const getTimeToGoDelta = function ()
-{
-    logger.debug("getTimeToGoDelta");
-    get("0x1007");
-}
-
-const getRelayLowSOC = function()
-{
-    logger.debug("getRelayLowSOC");
-    get("0x1008");
-}
-
-const getRelayLowSOCClear = function ()
-{
-    logger.debug("getRelayLowSOCClear");
-    get("0x1009");
-}
-
-const getUserCurrentZero = function ()
-{
-    logger.debug("getUserCurrentZero");
-    get("0x1034");
-}
-
-exports.registerListener = function(bmvdataKey, listener)
-{
-    bmvdata[bmvdataKey].on = listener;
-}
-
-var writeDeviceConfig = function(newCurrent, oldCurrent, precision)
-{
-    logger.trace("writeDeviceConfig");
-    // writeDeviceConfig is called by relayLowSOCClear's
-    // on function. Until then updateValuesAndValueListeners
-    // has written all newValue's to value with the exception
-    // of 
-    let config = {
-        BatteryCapacity:    bmvdata.capacity.value,
-        ChargedVoltage:     bmvdata.chargedVoltage.value,
-        TailCurrent:        bmvdata.tailCurrent.value,
-        ChargedDetectTime:  bmvdata.chargedDetectTime.value,
-        ChargeEfficiency:   bmvdata.chargeEfficiency.value,
-        PeukertCoefficient: bmvdata.peukertCoefficient.value,
-        CurrentThreshold:   bmvdata.currentThreshold.value,
-        TimeToGoDelta:      bmvdata.timeToGoDelta.value,
-        RelayLowSOC:        bmvdata.relayLowSOC.value,
-        RelayLowSOCClear:   bmvdata.relayLowSOCClear.value
-    };
-    logger.debug("Stringify to JSON format");
-    let jsonConfig = JSON.stringify(config, null, 2);
-    logger.debug(jsonConfig);
-    logger.debug("Writing config to file");
-    let file = __dirname + '/config.json';
-    // check: exist and writable
-    fs.access(file, fs.constants.F_OK | fs.constants.W_OK, (err) =>
-              {
-                  if (err) {
-                      logger.error(
-                          `cannot write ${file} (${err.code === 'ENOENT' ? 'does not exist' : 'is read-only'})`);
-                  } else {
-                      fs.writeFile(file, jsonConfig, (err) => {
-                          if (err) logger.error(err)
-                          else logger.info(file + " saved!");
-                      });
-                      //let config_file = fs.createWriteStream(__dirname + '/config.json', {flags: 'w'});
-                      //config_file.write(jsonConfig);
-                  }
-              });
-    console.log("deleting relayLowSOCClear listener");
-    exports.registerListener('relayLowSOCClear', null);
-}
-
-
-exports.getDeviceConfig = function(doSave)
-{
-    logger.trace("getDeviceConfig");
-    getBatteryCapacity();
-    getChargedVoltage();
-    getTailCurrent();
-    getChargedDetectTime();
-    getChargeEfficiency();
-    getPeukertCoefficient();
-    getCurrentThreshold();
-    getTimeToGoDelta();
-    getRelayLowSOC();
-
-    if (doSave) {
-        // prepare for saving the data:
-        console.log("registering writeDeviceConfig listener for relayLowSOCClear");
-        exports.registerListener('relayLowSOCClear', writeDeviceConfig);
-        getRelayLowSOCClear();
-    }
-}
-
-// EEE functions (switch on/off display values)
-// FIXME: the following shown functions need addressCache to be created before calling them
-const isVoltageShown = function ()
-{
-    logger.debug("isVoltageShown");
-    get("0xEEE0");
-}
-
-exports.setShowVoltage = function(onOff)
-{
-    logger.debug("setShowVoltage to " + onOff);
-    let strOnOff = toEndianHexStr(onOff, 1);
-    set("0xEEE0", strOnOff);
-}
-
-const isAuxiliaryVoltageShown = function ()
-{
-    logger.debug("isAuxiliaryVoltageShown");
-    get("0xEEE1");
-}
-
-exports.setShowAuxiliaryVoltage = function(onOff)
-{
-    logger.debug("setShowAuxiliaryVoltage to " + onOff);
-    let strOnOff = toEndianHexStr(onOff, 1);
-    set("0xEEE1", strOnOff);
-}
-
-const isMidVoltageShown = function ()
-{
-    logger.debug("isMidVoltageShown");
-    get("0xEEE2");
-}
-
-exports.setShowMidVoltage = function(onOff)
-{
-    logger.debug("setShowMidVoltage to " + onOff);
-    let strOnOff = toEndianHexStr(onOff, 1);
-    set("0xEEE2", strOnOff);
-}
-
-const isCurrentShown = function ()
-{
-    logger.debug("isCurrentShown");
-    get("0xEEE3");
-}
-
-exports.setShowCurrent = function(onOff)
-{
-    logger.debug("setShowCurrent to " + onOff);
-    let strOnOff = toEndianHexStr(onOff, 1);
-    set("0xEEE3", strOnOff);
-}
-
-const isConsumedAhShown = function ()
-{
-    logger.debug("isConsumedAhShown");
-    get("0xEEE4");
-}
-
-exports.setShowConsumedAh = function(onOff)
-{
-    logger.debug("setShowConsumedAh to " + onOff);
-    let strOnOff = toEndianHexStr(onOff, 1);
-    set("0xEEE4", strOnOff);
-}
-
-const isStateOfChargeShown = function ()
-{
-    logger.debug("isStateOfChargeShown");
-    get("0xEEE5");
-}
-
-exports.setShowStateOfCharge = function(onOff)
-{
-    logger.debug("setShowStateOfCharge to " + onOff);
-    let strOnOff = toEndianHexStr(onOff, 1);
-    set("0xEEE5", strOnOff);
-}
-
-const isTimeToGoShown = function ()
-{
-    logger.debug("isTimeToGoShown");
-    get("0xEEE6");
-}
-
-exports.setShowTimeToGo = function(onOff)
-{
-    logger.debug("setShowTimeToGo to " + onOff);
-    let strOnOff = toEndianHexStr(onOff, 1);
-    set("0xEEE6", strOnOff);
-}
-
-const isTemperatureShown = function ()
-{
-    logger.debug("isTemperatureShown");
-    get("0xEEE7");
-}
-
-exports.setShowTemperature = function(onOff)
-{
-    logger.debug("setShowTemperature to " + onOff);
-    let strOnOff = toEndianHexStr(onOff, 1);
-    set("0xEEE7", strOnOff);
-}
-
-const isPowerShown = function ()
-{
-    logger.debug("isPowerShown");
-    get("0xEEE8");
-}
-
-exports.setShowPower = function(onOff)
-{
-    logger.debug("setShowPower to " + onOff);
-    let strOnOff = toEndianHexStr(onOff, 1);
-    set("0xEEE8", strOnOff);
-}
-
-var checksum = 0;
-
-function updateChecksum(line) {
-    let res = line.split("\t");
-
-    // each frame starts with a linefeed and carriage return
-    // they are swollowed by readline('\r\n')
-    checksum += '\n'.charCodeAt(0);
-    checksum += '\r'.charCodeAt(0);
+//     // each frame starts with a linefeed and carriage return
+//     // they are swollowed by readline('\r\n')
+//     checksum += '\n'.charCodeAt(0);
+//     checksum += '\r'.charCodeAt(0);
     
-    let c;
-    // count all characters as uint8_t from first
-    // value pair name until and including Checksum - tab- and the
-    // uint8_t checksum value. Also include all the tabs between
-    // name and value pair and the \n and \r after each line.
-    // This checksum must be 0 (% 256)
+//     let c;
+//     // count all characters as uint8_t from first
+//     // value pair name until and including Checksum - tab- and the
+//     // uint8_t checksum value. Also include all the tabs between
+//     // name and value pair and the \n and \r after each line.
+//     // This checksum must be 0 (% 256)
 
-    let lineLength = line.length;
-    if (res[0] === "Checksum")
-    {
-        lineLength = res[0].length + 2; // plus \t and the checksum value
+//     let lineLength = line.length;
+//     if (res[0] === "Checksum")
+//     {
+//         lineLength = res[0].length + 2; // plus \t and the checksum value
+//     }
+//     else {
+//     }
+//     for (c = 0; c < lineLength; ++c)
+//     {
+//         checksum += line.charCodeAt(c);
+//     }
+//     return checksum;
+// }
+
+class RegularUpdateChecksum {
+    constructor() {
+	this.reset();
     }
-    else {
+
+    reset() {
+	this.checksum = 0;
     }
-    for (c = 0; c < lineLength; ++c)
-    {
-        checksum += line.charCodeAt(c);
+    
+    update(line) {
+	let res = line.split("\t");
+	
+	// each frame starts with a linefeed and carriage return
+	// they are swollowed by readline('\r\n')
+	this.checksum += '\n'.charCodeAt(0);
+	this.checksum += '\r'.charCodeAt(0);
+	
+	let c;
+	// count all characters as uint8_t from first
+	// value pair name until and including Checksum - tab- and the
+	// uint8_t checksum value. Also include all the tabs between
+	// name and value pair and the \n and \r after each line.
+	// This checksum must be 0 (% 256)
+
+	let lineLength = line.length;
+	if (res[0] === "Checksum")
+	{
+            lineLength = res[0].length + 2; // plus \t and the checksum value
+	}
+	//else {
+	//}
+	for (c = 0; c < lineLength; ++c)
+	{
+            this.checksum += line.charCodeAt(c);
+	}
+	return this.checksum;
     }
-    return checksum;
+
+    get() {
+	return this.checksum;
+    }
 }
+
 
 function updateValuesAndValueListeners(doLog) {
+    let mapOfChanges = {};
     for (const [key, obj] of Object.entries(map)) {
         if (obj.newValue != null && obj.value !== obj.newValue)
         {
@@ -441,14 +240,20 @@ function updateValuesAndValueListeners(doLog) {
             
             if (obj.on !== null) // && Math.abs(obj.value - obj.newValue) >= obj.precision)
             {
-                obj.on(obj.newValue, oldValue, obj.precision);
+                obj.on(obj.newValue, oldValue, obj.precision, packageArrivalTime);
             }
+	    mapOfChanges[key] = new Object();
+	    mapOfChanges[key].newValue  = obj.newValue;
+	    mapOfChanges[key].oldValue  = oldValue;
+	    mapOfChanges[key].precision = obj.precision;
             if (doLog) logger.debug(obj.shortDescr
                                     + " = " + oldValue
                                     + " updated with " + obj.newValue);
         }
         obj.newValue = null;
-    } 
+    }
+    // FIXME: enable once updateValuesAndValueListeners is member of class VitronEl....
+    //if (this.on !== null) this.on(mapOfChanges, packageArrivalTime);
 }
 
 function discardValues() {
@@ -505,36 +310,46 @@ function processCommand(cmd) {
     // TODO: check regularly for left overs in responseMap and cmdMessageQ
 }
 
+var packageArrivalTime = 0;
+var checksum = new RegularUpdateChecksum();
+
 function parse_serial(line) {
     let res = line.split("\t");
     if (!res[0] || res[0] === "") return; // empty string
-
-    let oldChecksum = checksum;
-    checksum = updateChecksum(line);
-    
+   
     if (res[0] === "Checksum")
     {
-        checksum = checksum % 256;
-        if (checksum === 0) // valid checksum for periodic frames
+	// Calculating checksum of "Checksum\t" (word Checksum + tab)
+	//
+	//              C  h   e   c  k   s   u   m   \t
+	// ASCII value: 67+104+101+99+107+115+117+109+11 = 828
+	//
+	// Looking at the oldCS and the expectedCS after receiving "Checksum\t":
+	//
+	// (oldCS + 828 + expectedCS) % 256 === 0!
+	// ==> (oldCS % 256) + (828 % 256) + expectedCS === 0 (expectedCS < 256)
+	// ==> expectedCS = -(oldCS % 256) - 60
+	//                = 256 - (oldCS % 256) + 196  
+	let expectedCS = (256 - (checksum.get() % 256) + 196) % 256; // Checksum+\t
+	if (expectedCS < 0) { expectedCS = expectedCS + 256; }
+
+	let cs = checksum.update(line);
+        cs = cs % 256;
+        if (cs === 0) // valid checksum for periodic frames
         {
             updateValuesAndValueListeners(false);
         }
         else // checksum invalid
         {
             discardValues();
-            // (oldChecksum + 828 + expectedCS) % 256 === 0!
-            // ==> (oldChecksum % 256) + (828 % 256) + expectedCS === 0
-            // ==> expectedCS = -(oldChecksum % 256) - 60
-            //                = 256 - (oldChecksum % 256) + 196  
-            let expectedCS = (256 - (oldChecksum % 256) + 196) % 256; // Checksum+\t
-            if (expectedCS < 0) { expectedCS = expectedCS + 256; }
             logger.error("ERROR: data set checksum: " 
                         + res[1].charCodeAt(0).toString(16) + ' ('
                         + res[1].charCodeAt(0)
                         + ") - expected: " + expectedCS.toString(16)
                         + ' (' + expectedCS + ')');
         }
-        checksum = 0; // checksum field read => reset checksum
+	packageArrivalTime = 0;
+        checksum.reset(); // checksum field read => reset checksum
         // frame always finishes before another frame
         // or before a command response arrives.
         // Check for command response now:
@@ -553,7 +368,9 @@ function parse_serial(line) {
     }
     else
     {
+	checksum.update(line);
         if (res[0] === undefined) return;
+	if (packageArrivalTime === 0) packageArrivalTime = new Date();
         if (res[0] in map && map[res[0]] !== undefined) map[res[0]].newValue = res[1];
         else logger.warn("parse_serial: " + res[0] + " is not registered and has value " + res[1]);
     }
@@ -577,73 +394,25 @@ function append_checksum(cmd) {
 
 var responseMap = {};
 
-function responseTimeoutHandler(cmdFrame, cmdRegisterPrefix) {
-    logger.error("ERROR: timeout - no response to "
-                 + cmdFrame + " within "
-                 + cmdResponseTimeoutMS + "ms");
-    if (cmdRegisterPrefix in responseMap && responseMap[cmdRegisterPrefix] !== undefined)
-    {
-        if (responseMap[cmdRegisterPrefix].doRetry <= 0)
-        {
-            delete responseMap[cmdRegisterPrefix];
-            //reject(new Error('timeout - no response received within 30 secs'));
-            cmdMessageQ.shift(); // finished work on this message - dump
-            logger.debug("Cmd Q: " + cmdMessageQ.length);
-            exports.restart(); // FIXME: after restart the following response received: 4000051
-        }
-        else if (cmdMessageQ.length > 0)
-        {
-            //exports.restart();
-            logger.debug("Repeating command ("
-                         + responseMap[cmdRegisterPrefix].doRetry + ") "
-                         + cmdMessageQ[0].substring(0, cmdMessageQ[0].length-1));
-        }
-    }
-    if (cmdMessageQ.length > 0)
-    {
-        const nextCmd = cmdMessageQ[0];
-        logger.debug("Send next command in Q: " + nextCmd.substring(0, nextCmd.length-1));
-        runMessageQ(false);
-    }
-}
-
-function getResponse(cmdFrame) {
-    return new Promise(function(resolve, reject)
-        {
-            // cmdRegisterPrefix is without leading : and ending \n
-            let cmdRegisterPrefix = cmdFrame.substring(1, 6);
-            logger.debug("Adding " + cmdRegisterPrefix + " to reponseMap");
-            var tid = setTimeout(responseTimeoutHandler, cmdResponseTimeoutMS, cmdFrame, cmdRegisterPrefix);
-            logger.debug("Timeout set to " + cmdResponseTimeoutMS
-                         + "ms for " + cmdRegisterPrefix);
-            let newRetries = cmdMaxRetries;
-            if (cmdRegisterPrefix in responseMap && responseMap[cmdRegisterPrefix] != undefined)
-                newRetries = responseMap[cmdRegisterPrefix].doRetry-1;
-            responseMap[cmdRegisterPrefix] = {
-                func:    resolve,
-                timerId: tid,
-                doRetry: newRetries,
-            };
-            port.write(cmdFrame);
-        });
-}
+// var priv_restart = function() {
+//     logger.debug("restart");
+//     port.write(':64F\n'); 
+// };
 
 
-var cmdMessageQ = [];
+// function get(address, priority) {
+//     logger.debug("get address: " + address);
+//     const message = createMessage('7', address, '');
+//     sendMsg(message, priority);
+// }
 
-function get(address, priority) {
-    logger.debug("get address: " + address);
-    const message = createMessage('7', address, '');
-    sendMsg(message, priority);
-}
-
-// \param value must be a string of 4 or 8  characters in hexadecimal
-//        with byte pairs swapped, i.e. 1B83 => 831B
-function set(address, value, priority) {
-    logger.debug("set address: " + address);
-    const message = createMessage('8', address, value);
-    sendMsg(message, priority);
-}
+// // \param value must be a string of 4 or 8  characters in hexadecimal
+// //        with byte pairs swapped, i.e. 1B83 => 831B
+// function set(address, value, priority) {
+//     logger.debug("set address: " + address);
+//     const message = createMessage('8', address, value);
+//     sendMsg(message, priority);
+// }
 
 // \param address is a string and has the format 0x???? (uint16 with leading zeros if needed)
 // \param value as string, little endianed and filled with 0 from the left
@@ -659,56 +428,6 @@ function createMessage(cmd, address, value) {
     let command = ':' + cmd + leAddress + flag + value;
     command = append_checksum(command) + '\n';
     return command;
-}
-
-// \param message is a command starting with : and ending with the checksum
-// \param priority is 0 or 1, 1 is prefered execution
-function Q_push_back(message, priority) {
-    const l = cmdMessageQ.length;
-
-    if (priority !== undefined && priority === 1)
-    {
-        if (l > 0)
-        {
-            logger.debug("Prioritizing " + message);
-            // first is currently executed --> leave at position 0
-            let first = cmdMessageQ.shift();
-            // insert message at position 1
-            cmdMessageQ.unshift(first, message);
-            // it is possible that cmdMessageQ and message are the same command
-            // (with same or different parameters). However we cannot compress
-            // because we do not know at which execution state cmdMessageQ[0] is.
-            logger.debug("Cmd Q: " + cmdMessageQ.length);
-        }
-        else // l == 0
-        {
-            cmdMessageQ.push(message);
-            logger.debug("Cmd Q: " + cmdMessageQ.length);
-        }
-        return;
-    }
-    // check: current command is same as previous but with possibly different
-    //        parameter ==> if cmdCompression, execute only current command and
-    //        skip previous
-    if (cmdCompression
-        && (l > 0) && (cmdMessageQ[l-1].substring(0, 6) == message.substring(0, 6)))
-    {   // replace last command 
-        cmdMessageQ[l-1] = message;
-        logger.debug("Last cmd in Q replaced: " + cmdMessageQ.length);
-    }
-    else
-    {
-        // never execute the very same command twice as it is like bouncing
-        if (l === 0 || cmdMessageQ[l-1] != message)
-        {
-            cmdMessageQ.push(message);
-            logger.debug("Cmd Q: " + cmdMessageQ.length);
-        }
-        else
-        {
-            logger.debug("Repeated message ignored: " + message);
-        }
-    }
 }
 
 // \param response without leading : and trailing \n
@@ -753,150 +472,6 @@ function endianSwap(hexStr, lengthInBytes)
     if (hexStr.length >= 12)
         logger.warn("endianSwap() not implemented for 12 bytes");
     return hexStr.toUpperCase();
-}
-
-function responseHandler(response) {
-    logger.debug("responseHandler(" + response + ")");
-    // response contains the message without leading : and trailing \n
-    if (response == "AAAA")
-    {
-        logger.error("framing error");
-        return -1;
-    }
-    if (response.substring(0, 5) !== cmdMessageQ[0].substring(1, 6))
-    {
-        logger.error("response " + response
-                     + " does not map queued command: "
-                     + cmdMessageQ[0]);
-        return -2;
-    }
-    // check flag
-    let flag = "00";
-    if (response !== undefined) {
-        if (messageState(response) !== 0) return -1;
-        let strValue = response.substring(7, response.length-2);
-        let valuesNumberOfBytes = strValue.length/2;
-        strValue = endianSwap(strValue, valuesNumberOfBytes);
-        logger.debug("endianed hex value: " + strValue);
-        const address = "0x" + response.substring(3, 5) + response.substring(1, 3);
-        if (address in addressCache)
-        {
-            addressCache[address].newValue = addressCache[address].fromHexStr(strValue);
-            logger.debug("response for "
-                         + addressCache[address].shortDescr + ' (old: ' +
-                         + addressCache[address].value + ") - new value: " +
-                         + addressCache[address].newValue);
-            //copied from updateValuesAndValueListeners(true); since it cannot be used !!! causes issues
-            if (addressCache[address].value !== addressCache[address].newValue)
-            {
-                let oldValue = addressCache[address].value;
-                addressCache[address].value = addressCache[address].newValue; // accept new values
-                // send event to listeners with values
-                // on() means if update applied,
-            
-                if (addressCache[address].on !== null) // && Math.abs(obj.value - obj.newValue) >= obj.precision)
-                {
-                    addressCache[address].on(addressCache[address].newValue, oldValue, addressCache[address].precision);
-                }
-                addressCache[address].newValue = null;
-            }
-        }
-        else {
-            logger.warn(address + " is not in addressCache");
-            addressCache[address] = new Object();
-            addressCache[address].newValue = conv.hexToUint(strValue);
-        }
-    }
-    else logger.warn("Response is undefined");
-    //TODO: if response does not match expected response sendMsg(message, priority) again.
-    const lastCmd = cmdMessageQ[0];
-    // take last char off which is \n
-    logger.debug(lastCmd.substring(0, lastCmd.length-1) + "\\n processed - dequeing");
-    cmdMessageQ.shift(); // finished work on this message - dump
-    logger.debug("Cmd Q: " + cmdMessageQ.length);
-    runMessageQ(false);
-}
-
-function runMessageQ(isTimeout)
-{
-    if (cmdMessageQ.length > 0) {
-        if (isSerialOperational)
-        {
-            if (sendMessageDeferTimer != null) {
-                clearTimeout(sendMessageDeferTimer);
-                //sendMessageDeferTimer = null;
-            }
-            const nextCmd = cmdMessageQ[0];
-
-            // TODO:
-            // const address = "0x" + nextCmd.substring(4, 6) + nextCmd.substring(2, 4);
-            // const value = nextCmd.substring(6, nextCmd.length-2);
-            // // TODO: endianian value
-            // if (addressCache[address].value ==
-            //  addressCache[address].fromHexStr(strValue)) // FIXME: does convert do the job?
-            // {
-            //  logger.debug("Cached value same as command value - ignoring");
-            //  return;
-            // }
-
-            logger.debug("Sending " + nextCmd.substring(0, nextCmd.length-1));
-            getResponse(nextCmd).then(responseHandler)
-                .catch(function(reject) {
-                    logger.warn("Reject: " + reject.message);
-                });
-        }
-        else
-        {
-            if (! isTimeout && cmdMessageQ.length === 1) {
-                logger.debug("==> sendMessage deferred by 1 second");
-                clearTimeout(sendMessageDeferTimer);
-                sendMessageDeferTimer = setTimeout(runMessageQ, 1000, true ) ;
-            } else {
-                // if timeout happend the timer expired and we start a new one
-                logger.debug("==> deferred another time by 1 second");
-                clearTimeout(sendMessageDeferTimer);
-                sendMessageDeferTimer = setTimeout(runMessageQ, 1000, true ) ;
-            }
-            // else a new message came in but port not yet operational
-            // ==> don't start another timer
-        }
-    }
-    else
-        logger.debug("MessageQ empty");
-}
-
-function sendMsg(message, priority) {
-    message = message.toUpperCase();
-    logger.trace("sendMsg: " + message.substring(0, message.length-1) + "\\n");
-
-    if (cmdMessageQ.length === 0)
-    {
-        // TODO: cmdMessageQ empty ==> clear responseMap
-        Q_push_back(message, priority);
-        runMessageQ(false);
-    }
-    else
-    {
-        Q_push_back(message, priority);
-        // FIXME: message times out and is removed from responseMap but then
-        //        may still arrive (not being found in repsonseMap -> TODO: timeoutmap???
-        // FIXME: 2 or more same commands fired right after each other with
-        //        cmdCompression switched off ==> only one responseMap entry
-        //        while it should be 2 or more, i.e. 1 response deletes
-        //        this entry and later incoming don't work
-        let firstCmdInQ = cmdMessageQ[0];
-        setTimeout(function()
-        {
-            // if after the max timeout firstCmdInQ is still the first in Q
-            if (firstCmdInQ === cmdMessageQ[0])
-            {
-                // FIXME: firstCmdInQ could match a later cmd in Q which is no
-                //        in pos 0
-                cmdMessageQ.shift();
-                runMessageQ(false); // FIXME: this runs occassionally two msg in parallel
-            }
-        }, 2 * (cmdMaxRetries + 1) * cmdResponseTimeoutMS);
-    }
 }
 
 
@@ -989,49 +564,17 @@ function toEndianHexStr(value, lengthInBytes)
 }
 
 
-function sendSimpleCommand(cmd, expectedResponse) {
-    var command = ':' + cmd;
-    command = append_checksum(command) + '\n';
-    logger.debug("===================================");
-    logger.debug("send command: " + command);
-    
-    getResponse(command).then(
-        function(response) {
-            // resolve contains the command without leading : and trailing \n
-            logger.debug("Response: " + response);
-
-            if (response !== undefined
-                && response.substring(1, 2) == expectedResponse) {
-                var strValue = response.substring(2, response.length-2);
-                strValue = strValue.substring(2, 4) + strValue.substring(0, 2);
-                logger.debug("Response value: " + strValue);
-            }
-            else logger.debug("Response is undefined or unexpected");
-        })
-        .catch(function(reject) {
-            logger.debug("Reject: " + reject.message);
-        });
-}
 
 
-
-exports.productId = function() {
-    logger.debug("product id");
-    sendSimpleCommand('4', '1');
-    //port.write(':451\n'); // product ID
-    // returns :1 04 02 4E ==> 0x0204 ==> version 0x204 ==> BMV 702
-    // 1 = Done
-    // CS 0x55
-};
 
 //:74F030000FC
 // relay is dflt
 
 
-set_relay_mode = function(mode) {
-    logger.debug("set relay mode");
-    port.write(':84F030002F9'); // mode = 2 (rmt)
-}
+// set_relay_mode = function(mode) {
+//     logger.debug("set relay mode");
+//     port.write(':84F030002F9'); // mode = 2 (rmt)
+// }
 
 
 
@@ -1051,11 +594,14 @@ set_relay_mode = function(mode) {
 
 
 
+
 class VitronEnergyDevice {
     //port;
     constructor(){
         // set isRecording true to record the incoming data stream to record_file
         this.isRecording = false;
+	this.cmdMessageQ = [];
+	this.on = null;
         if(! VitronEnergyDevice.instance){
             this.open('/dev/serial/by-id/usb-VictronEnergy_BV_VE_Direct_cable_VE1SUT80-if00-port0');
             VitronEnergyDevice.instance = this;
@@ -1077,6 +623,315 @@ class VitronEnergyDevice {
         });
     }
 
+    restart() {
+	logger.debug("restart");
+	this.port.write(':64F\n'); 
+    }
+
+    responseTimeoutHandler(cmdFrame, cmdRegisterPrefix) {
+	logger.error("ERROR: timeout - no response to "
+                     + cmdFrame + " within "
+                     + cmdResponseTimeoutMS + "ms");
+	if (cmdRegisterPrefix in responseMap && responseMap[cmdRegisterPrefix] !== undefined)
+	{
+            if (responseMap[cmdRegisterPrefix].doRetry <= 0)
+            {
+		delete responseMap[cmdRegisterPrefix];
+		//reject(new Error('timeout - no response received within 30 secs'));
+		this.cmdMessageQ.shift(); // finished work on this message - dump
+		logger.debug("Cmd Q: " + this.cmdMessageQ.length);
+		this.restart(); // FIXME: after restart the following response received: 4000051
+            }
+            else if (this.cmdMessageQ.length > 0)
+            {
+		//this.restart();
+		logger.debug("Repeating command ("
+                             + responseMap[cmdRegisterPrefix].doRetry + ") "
+                             + this.cmdMessageQ[0].substring(0, this.cmdMessageQ[0].length-1));
+            }
+	}
+	if (this.cmdMessageQ.length > 0)
+	{
+            const nextCmd = this.cmdMessageQ[0];
+            logger.debug("Send next command in Q: " + nextCmd.substring(0, nextCmd.length-1));
+            this.runMessageQ(false);
+	}
+    }
+
+    getResponse(cmdFrame) {
+	var that = this;
+	return new Promise(function(resolve, reject)
+			   {
+			       // cmdRegisterPrefix is without leading : and ending \n
+			       let cmdRegisterPrefix = cmdFrame.substring(1, 6);
+			       logger.debug("Adding " + cmdRegisterPrefix + " to reponseMap");
+
+			       //var tid = setTimeout(this.responseTimeoutHandler, cmdResponseTimeoutMS, cmdFrame, cmdRegisterPrefix);
+			       var tid = setTimeout(
+				   function(cmdFrame, cmdRegisterPrefix) // do these params need bind?
+				   {
+				       that.responseTimeoutHandler(cmdFrame, cmdRegisterPrefix);
+				   }, cmdResponseTimeoutMS, cmdFrame, cmdRegisterPrefix);
+
+			       logger.debug("Timeout set to " + cmdResponseTimeoutMS
+					    + "ms for " + cmdRegisterPrefix);
+			       let newRetries = cmdMaxRetries;
+			       if (cmdRegisterPrefix in responseMap && responseMap[cmdRegisterPrefix] != undefined)
+				   newRetries = responseMap[cmdRegisterPrefix].doRetry-1;
+			       responseMap[cmdRegisterPrefix] = {
+				   func:    resolve,
+				   timerId: tid,
+				   doRetry: newRetries,
+			       };
+			       that.port.write(cmdFrame);
+			   });
+    }
+
+    sendSimpleCommand(cmd, expectedResponse) {
+	var command = ':' + cmd;
+	command = append_checksum(command) + '\n';
+	logger.debug("===================================");
+	logger.debug("send command: " + command);
+	
+	this.getResponse(command).then(
+            function(response) {
+		// resolve contains the command without leading : and trailing \n
+		logger.debug("Response: " + response);
+
+		if (response !== undefined
+                    && response.substring(1, 2) == expectedResponse) {
+                    var strValue = response.substring(2, response.length-2);
+                    strValue = strValue.substring(2, 4) + strValue.substring(0, 2);
+                    logger.debug("Response value: " + strValue);
+		}
+		else logger.debug("Response is undefined or unexpected");
+            })
+            .catch(function(reject) {
+		logger.debug("Reject: " + reject.message);
+            });
+    }
+
+    responseHandler(response) {
+	logger.debug("responseHandler(" + response + ")");
+	// response contains the message without leading : and trailing \n
+	if (response == "AAAA")
+	{
+            logger.error("framing error");
+            return -1;
+	}
+	if (response.substring(0, 5) !== this.cmdMessageQ[0].substring(1, 6))
+	{
+            logger.error("response " + response
+			 + " does not map queued command: "
+			 + this.cmdMessageQ[0]);
+            return -2;
+	}
+	// check flag
+	let flag = "00";
+	if (response !== undefined) {
+            if (messageState(response) !== 0) return -1;
+            let strValue = response.substring(7, response.length-2);
+            let valuesNumberOfBytes = strValue.length/2;
+            strValue = endianSwap(strValue, valuesNumberOfBytes);
+            logger.debug("endianed hex value: " + strValue);
+            const address = "0x" + response.substring(3, 5) + response.substring(1, 3);
+            if (address in addressCache)
+            {
+		addressCache[address].newValue = addressCache[address].fromHexStr(strValue);
+		logger.debug("response for "
+                             + addressCache[address].shortDescr + ' (old: ' +
+                             + addressCache[address].value + ") - new value: " +
+                             + addressCache[address].newValue);
+		//copied from updateValuesAndValueListeners(true); since it cannot be used !!! causes issues
+		if (addressCache[address].value !== addressCache[address].newValue)
+		{
+                    let oldValue = addressCache[address].value;
+                    addressCache[address].value = addressCache[address].newValue; // accept new values
+                    // send event to listeners with values
+                    // on() means if update applied,
+		    
+                    if (addressCache[address].on !== null) // && Math.abs(obj.value - obj.newValue) >= obj.precision)
+                    {
+			addressCache[address].on(addressCache[address].newValue, oldValue, addressCache[address].precision, packageArrivalTime);
+                    }
+                    addressCache[address].newValue = null;
+		}
+            }
+            else {
+		logger.warn(address + " is not in addressCache");
+		addressCache[address] = new Object();
+		addressCache[address].newValue = conv.hexToUint(strValue);
+            }
+	}
+	else logger.warn("Response is undefined");
+	//TODO: if response does not match expected response sendMsg(message, priority) again.
+	const lastCmd = this.cmdMessageQ[0];
+	// take last char off which is \n
+	logger.debug(lastCmd.substring(0, lastCmd.length-1) + "\\n processed - dequeing");
+	this.cmdMessageQ.shift(); // finished work on this message - dump
+	logger.debug("Cmd Q: " + this.cmdMessageQ.length);
+	this.runMessageQ(false);
+    }
+
+    runMessageQ(isTimeout)
+    {
+	if (this.cmdMessageQ.length > 0) {
+            if (isSerialOperational)
+            {
+		if (sendMessageDeferTimer != null) {
+                    clearTimeout(sendMessageDeferTimer);
+                    //sendMessageDeferTimer = null;
+		}
+		const nextCmd = this.cmdMessageQ[0];
+
+		// TODO:
+		// const address = "0x" + nextCmd.substring(4, 6) + nextCmd.substring(2, 4);
+		// const value = nextCmd.substring(6, nextCmd.length-2);
+		// // TODO: endianian value
+		// if (addressCache[address].value ==
+		//  addressCache[address].fromHexStr(strValue)) // FIXME: does convert do the job?
+		// {
+		//  logger.debug("Cached value same as command value - ignoring");
+		//  return;
+		// }
+
+		logger.debug("Sending " + nextCmd.substring(0, nextCmd.length-1));
+		this.getResponse(nextCmd).then(this.responseHandler)
+                    .catch(function(reject) {
+			logger.warn("Reject: " + reject.message);
+                    });
+            }
+            else
+            {
+		if (! isTimeout && this.cmdMessageQ.length === 1) {
+                    logger.debug("==> sendMessage deferred by 1 second");
+                    //clearTimeout(sendMessageDeferTimer);
+                    //sendMessageDeferTimer = setTimeout(this.runMessageQ, 1000, true ) ;
+		} else {
+                    // if timeout happend the timer expired and we start a new one
+                    logger.debug("==> deferred another time by 1 second");
+                    //clearTimeout(sendMessageDeferTimer);
+                    //sendMessageDeferTimer = setTimeout(this.runMessageQ, 1000, true ) ;
+		}
+		clearTimeout(sendMessageDeferTimer);
+                sendMessageDeferTimer = setTimeout(function()
+						   {
+						       this.runMessageQ(true);
+						   }.bind(this), 1000) ;
+		// else a new message came in but port not yet operational
+		// ==> don't start another timer
+            }
+	}
+	else
+            logger.debug("MessageQ empty");
+    }
+
+    // \param message is a command starting with : and ending with the checksum
+    // \param priority is 0 or 1, 1 is prefered execution
+    Q_push_back(message, priority) {
+	const l = this.cmdMessageQ.length;
+
+	if (priority !== undefined && priority === 1)
+	{
+            if (l > 0)
+            {
+		logger.debug("Prioritizing " + message);
+		// first is currently executed --> leave at position 0
+		let first = this.cmdMessageQ.shift();
+		// insert message at position 1
+		this.cmdMessageQ.unshift(first, message);
+		// it is possible that this.cmdMessageQ and message are the same command
+		// (with same or different parameters). However we cannot compress
+		// because we do not know at which execution state this.cmdMessageQ[0] is.
+		logger.debug("Cmd Q: " + this.cmdMessageQ.length);
+            }
+            else // l == 0
+            {
+		this.cmdMessageQ.push(message);
+		logger.debug("Cmd Q: " + this.cmdMessageQ.length);
+            }
+            return;
+	}
+	// check: current command is same as previous but with possibly different
+	//        parameter ==> if cmdCompression, execute only current command and
+	//        skip previous
+	if (cmdCompression
+            && (l > 0) && (this.cmdMessageQ[l-1].substring(0, 6) == message.substring(0, 6)))
+	{   // replace last command 
+            this.cmdMessageQ[l-1] = message;
+            logger.debug("Last cmd in Q replaced: " + this.cmdMessageQ.length);
+	}
+	else
+	{
+            // never execute the very same command twice as it is like bouncing
+            if (l === 0 || this.cmdMessageQ[l-1] != message)
+            {
+		this.cmdMessageQ.push(message);
+		logger.debug("Cmd Q: " + this.cmdMessageQ.length);
+            }
+            else
+            {
+		logger.debug("Repeated message ignored: " + message);
+            }
+	}
+    }
+
+    sendMsg(message, priority) {
+	message = message.toUpperCase();
+	logger.trace("sendMsg: " + message.substring(0, message.length-1) + "\\n");
+
+	if (this.cmdMessageQ.length === 0)
+	{
+            // TODO: this.cmdMessageQ empty ==> clear responseMap
+            this.Q_push_back(message, priority);
+            this.runMessageQ(false);
+	}
+	else
+	{
+            this.Q_push_back(message, priority);
+            // FIXME: message times out and is removed from responseMap but then
+            //        may still arrive (not being found in repsonseMap -> TODO: timeoutmap???
+            // FIXME: 2 or more same commands fired right after each other with
+            //        cmdCompression switched off ==> only one responseMap entry
+            //        while it should be 2 or more, i.e. 1 response deletes
+            //        this entry and later incoming don't work
+            let firstCmdInQ = this.cmdMessageQ[0];
+            setTimeout(function()
+		       {
+			   // if after the max timeout firstCmdInQ is still the first in Q
+			   if (firstCmdInQ === this.cmdMessageQ[0])
+			   {
+			       // FIXME: firstCmdInQ could match a later cmd in Q which is no
+			       //        in pos 0
+			       this.cmdMessageQ.shift();
+			       this.runMessageQ(false); // FIXME: this runs occassionally two msg in parallel
+			   }
+		       }.bind(this), 2 * (cmdMaxRetries + 1) * cmdResponseTimeoutMS);
+	}
+    }
+
+    get(address, priority) {
+	logger.debug("get address: " + address);
+	const message = createMessage('7', address, '');
+	this.sendMsg(message, priority);
+    }
+
+    // \param value must be a string of 4 or 8  characters in hexadecimal
+    //        with byte pairs swapped, i.e. 1B83 => 831B
+    set(address, value, priority) {
+	logger.debug("set address: " + address);
+	const message = createMessage('8', address, value);
+	this.sendMsg(message, priority);
+    }
+
+    // EEE functions (switch on/off display values)
+    // FIXME: the following shown functions need addressCache to be created before calling them
+    isVoltageShown()
+    {
+	logger.debug("isVoltageShown");
+	get("0xEEE0");
+    }
+
     setStateOfCharge(soc)
     {
         if (soc < 0 || soc > 100)
@@ -1085,167 +940,363 @@ class VitronEnergyDevice {
             return;
         }
         soc = Math.round(100 * soc);
-        strSoc = toEndianHexStr(soc, 2);
+        let strSoc = toEndianHexStr(soc, 2);
         logger.debug("setSOC: " + soc + " as hex-string " + strSoc);
-        set("0x0FFF", strSoc); // FIXME: this goes wrong if strSOC = "0020" since that becomes 20 inside set
+        this.set("0x0FFF", strSoc); // FIXME: this goes wrong if strSOC = "0020" since that becomes 20 inside set
     }
 
     getStateOfCharge()
     {
-        get("0x0FFF");
+        this.get("0x0FFF");
     }
-
 
     setBatteryCapacity(capacity) {
         logger.debug("setBatteryCapacity to " + capacity);
 
         let strCapacity = toEndianHexStr(capacity, 2);
-        set("0x1000", strCapacity);
+        this.set("0x1000", strCapacity);
     };
+
+    getBatteryCapacity()
+    {
+	logger.debug("getBatteryCapacity");
+	this.get("0x1000");
+    }
 
     setChargedVoltage(voltage)
     {
         logger.debug("setChargedVoltage to " + voltage);
         let strVoltage = toEndianHexStr(voltage, 2);
-        set("0x1001", strVoltage);
+        this.set("0x1001", strVoltage);
+    }
+
+    getChargedVoltage()
+    {
+	logger.debug("getChargedVoltage");
+	this.get("0x1001");
     }
 
     setTailCurrent(current)
     {
         logger.debug("setTailCurrent to " + current);
         let strCurrent = toEndianHexStr(current, 2);
-        set("0x1002", strCurrent);
+        this.set("0x1002", strCurrent);
+    }
+
+    getTailCurrent()
+    {
+	logger.debug("getTailCurrent");
+	this.get("0x1002");
     }
 
     setChargedDetectTime(time)
     {
         logger.debug("setChargedDetectTime to " + time);
         let strTime = toEndianHexStr(time, 2);
-        set("0x1003", strTime);
+        this.set("0x1003", strTime);
     }
+
+    getChargedDetectTime()
+    {
+	logger.debug("getChargedDetectTime");
+	this.get("0x1003");
+    }
+
 
     setChargeEfficiency(percent)
     {
         logger.debug("setChargeEfficiency to " + percent);
         let strPerc = toEndianHexStr(percent, 2);
-        set("0x1004", strPerc);
+        this.set("0x1004", strPerc);
+    }
+
+    getChargeEfficiency()
+    {
+	logger.debug("getChargeEfficiency");
+	this.get("0x1004");
     }
 
     setPeukertCoefficient(coeff)
     {
         logger.debug("setPeukertCoefficient to " + coeff);
         let strCoeff = toEndianHexStr(coeff, 2);
-        set("0x1005", strCoeff);
+        this.set("0x1005", strCoeff);
+    }
+
+    getPeukertCoefficient()
+    {
+	logger.debug("getPeukertCoefficient");
+	this.get("0x1005");
     }
 
     setCurrentThreshold(current)
     {
         logger.debug("setCurrentThreshold to " + current);
         let strCurrent = toEndianHexStr(current, 2);
-        set("0x1006", strCurrent);
+        this.set("0x1006", strCurrent);
+    }
+
+    getCurrentThreshold()
+    {
+	logger.debug("getCurrentThreshold");
+	this.get("0x1006");
     }
 
     setTimeToGoDelta(time)
     {
         logger.debug("setTimeToGoDelta to " + time);
         let strTime = toEndianHexStr(time, 2);
-        set("0x1007", strTime);
+        this.set("0x1007", strTime);
+    }
+
+    getTimeToGoDelta()
+    {
+	logger.debug("getTimeToGoDelta");
+	this.get("0x1007");
+    }
+
+    isTimeToGoShown()
+    {
+	logger.debug("isTimeToGoShown");
+	this.get("0xEEE6");
+    }
+
+    setShowTimeToGo(onOff)
+    {
+	logger.debug("setShowTimeToGo to " + onOff);
+	let strOnOff = toEndianHexStr(onOff, 1);
+	this.set("0xEEE6", strOnOff);
+    }
+
+    isTemperatureShown() {
+	logger.debug("isTemperatureShown");
+	this.get("0xEEE7");
+    }
+
+    setShowTemperature(onOff)
+    {
+	logger.debug("setShowTemperature to " + onOff);
+	let strOnOff = toEndianHexStr(onOff, 1);
+	this.set("0xEEE7", strOnOff);
+    }
+
+    isPowerShown()
+    {
+	logger.debug("isPowerShown");
+	this.get("0xEEE8");
+    }
+
+    setShowPower(onOff)
+    {
+	logger.debug("setShowPower to " + onOff);
+	let strOnOff = toEndianHexStr(onOff, 1);
+	this.set("0xEEE8", strOnOff);
     }
 
     setRelayLowSOC(percent)
     {
         logger.debug("setRelayLowSOC to " + percent);
         let strPercent = toEndianHexStr(percent, 2);
-        set("0x1008", strPercent);
+        this.set("0x1008", strPercent);
+    }
+
+    getRelayLowSOC()
+    {
+	logger.debug("getRelayLowSOC");
+	this.get("0x1008");
     }
 
     setRelayLowSOCClear(percent)
     {
         logger.debug("setRelayLowSOCClear to " + percent);
         let strPercent = toEndianHexStr(percent, 2);
-        set("0x1009", strPercent);
+        this.set("0x1009", strPercent);
+    }
+
+    getRelayLowSOCClear()
+    {
+	logger.debug("getRelayLowSOCClear");
+	this.get("0x1009");
     }
 
     setUserCurrentZero(count)
     {
         logger.debug("setUserCurrentZero to " + count);
         let strCount = toEndianHexStr(count, 2);
-        set("0x1034", strCount);
+        this.set("0x1034", strCount);
+    }
+
+    getUserCurrentZero()
+    {
+	logger.debug("getUserCurrentZero");
+	get("0x1034");
     }
 
     setShowVoltage(onOff)
     {
         logger.debug("setShowVoltage to " + onOff);
         let strOnOff = toEndianHexStr(onOff, 1);
-        set("0xEEE0", strOnOff);
+        this.set("0xEEE0", strOnOff);
     }
 
+    isAuxiliaryVoltageShown()
+    {
+	logger.debug("isAuxiliaryVoltageShown");
+	get("0xEEE1");
+    }
+    
     setShowAuxiliaryVoltage(onOff)
     {
         logger.debug("setShowAuxiliaryVoltage to " + onOff);
         let strOnOff = toEndianHexStr(onOff, 1);
-        set("0xEEE1", strOnOff);
+        this.set("0xEEE1", strOnOff);
     }
 
     setShowMidVoltage(onOff)
     {
         logger.debug("setShowMidVoltage to " + onOff);
         let strOnOff = toEndianHexStr(onOff, 1);
-        set("0xEEE2", strOnOff);
+        this.set("0xEEE2", strOnOff);
+    }
+
+    isCurrentShown()
+    {
+	logger.debug("isCurrentShown");
+	this.get("0xEEE3");
+    }
+
+    isMidVoltageShown()
+    {
+	logger.debug("isMidVoltageShown");
+	this.get("0xEEE2");
     }
 
     setShowCurrent(onOff)
     {
         logger.debug("setShowCurrent to " + onOff);
         let strOnOff = toEndianHexStr(onOff, 1);
-        set("0xEEE3", strOnOff);
+        this.set("0xEEE3", strOnOff);
+    }
+
+    setShowConsumedAh(onOff)
+    {
+	logger.debug("setShowConsumedAh to " + onOff);
+	let strOnOff = toEndianHexStr(onOff, 1);
+	this.set("0xEEE4", strOnOff);
+    }
+
+    isConsumedAhShown()
+    {
+	logger.debug("isConsumedAhShown");
+	this.get("0xEEE4");
+    }
+
+    setShowStateOfCharge(onOff)
+    {
+	logger.debug("setShowStateOfCharge to " + onOff);
+	let strOnOff = toEndianHexStr(onOff, 1);
+	this.set("0xEEE5", strOnOff);
+    }
+
+    isStateOfChargeShown()
+    {
+	logger.debug("isStateOfChargeShown");
+	this.get("0xEEE5");
+    }
+
+    writeDeviceConfig(newCurrent, oldCurrent, precision, timestamp)
+    {
+	logger.trace("writeDeviceConfig");
+	// writeDeviceConfig is called by relayLowSOCClear's
+	// on function. Until then updateValuesAndValueListeners
+	// has written all newValue's to value with the exception
+	// of 
+	let config = {
+            BatteryCapacity:    bmvdata.capacity.value,
+            ChargedVoltage:     bmvdata.chargedVoltage.value,
+            TailCurrent:        bmvdata.tailCurrent.value,
+            ChargedDetectTime:  bmvdata.chargedDetectTime.value,
+            ChargeEfficiency:   bmvdata.chargeEfficiency.value,
+            PeukertCoefficient: bmvdata.peukertCoefficient.value,
+            CurrentThreshold:   bmvdata.currentThreshold.value,
+            TimeToGoDelta:      bmvdata.timeToGoDelta.value,
+            RelayLowSOC:        bmvdata.relayLowSOC.value,
+            RelayLowSOCClear:   bmvdata.relayLowSOCClear.value
+	};
+	logger.debug("Stringify to JSON format");
+	let jsonConfig = JSON.stringify(config, null, 2);
+	logger.debug(jsonConfig);
+	logger.debug("Writing config to file");
+	let file = __dirname + '/config.json';
+	// check: exist and writable
+	fs.access(file, fs.constants.F_OK | fs.constants.W_OK, (err) =>
+		  {
+                      if (err) {
+			  logger.error(
+                              `cannot write ${file} (${err.code === 'ENOENT' ? 'does not exist' : 'is read-only'})`);
+                      } else {
+			  fs.writeFile(file, jsonConfig, (err) => {
+                              if (err) logger.error(err)
+                              else logger.info(file + " saved!");
+			  });
+			  //let config_file = fs.createWriteStream(__dirname + '/config.json', {flags: 'w'});
+			  //config_file.write(jsonConfig);
+                      }
+		  });
+	console.log("deleting relayLowSOCClear listener");
+	this.registerListener('relayLowSOCClear', null);
     }
 
     getDeviceConfig(doSave)
     {
         logger.trace("getDeviceConfig");
-        getBatteryCapacity();
-        getChargedVoltage();
-        getTailCurrent();
-        getChargedDetectTime();
-        getChargeEfficiency();
-        getPeukertCoefficient();
-        getCurrentThreshold();
-        getTimeToGoDelta();
-        getRelayLowSOC();
+        this.getBatteryCapacity();
+        this.getChargedVoltage();
+        this.getTailCurrent();
+        this.getChargedDetectTime();
+        this.getChargeEfficiency();
+        this.getPeukertCoefficient();
+        this.getCurrentThreshold();
+        this.getTimeToGoDelta();
+        this.getRelayLowSOC();
 
         if (doSave) {
             // prepare for saving the data:
             console.log("registering writeDeviceConfig listener for relayLowSOCClear");
-            registerListener('relayLowSOCClear', writeDeviceConfig);
-            getRelayLowSOCClear();
+            this.registerListener('relayLowSOCClear', this.writeDeviceConfig);
+            this.getRelayLowSOCClear();
         }
     }
 
+    set_relay_mode(mode) {
+	logger.debug("set relay mode");
+	this.port.write(':84F030002F9'); // mode = 2 (rmt)
+    }
+
     setRelay(mode) {
-        logger.debug("set relay mode");
-        set_relay_mode();
+        logger.debug("set relay");
+        this.set_relay_mode();
         if (mode === 0)
-            set("0x034E", "00", 1);
+            this.set("0x034E", "00", 1);
         else
-            set("0x034E", "01", 1);
+            this.set("0x034E", "01", 1);
     }
 
     set_alarm() {
         logger.debug("set alarm");
-        set("0xEEFC", "01");
+        this.set("0xEEFC", "01");
     }
     
     clear_alarm() {
         logger.debug("clear alarm");
-        //set("0xEEFC", "00");
-        set("0x031F", "00");
+        //this.set("0xEEFC", "00");
+        this.set("0x031F", "00");
     }
 
     ping() {
         logger.debug("ping");
         //port.write(':154\n'); // ping
-        sendSimpleCommand('1', '5');
+        this.sendSimpleCommand('1', '5');
         // returns :5 05 43 08 ==> 0x4305 ==> version 3.05
         // 5 = reply to ping
         // CS 0x55
@@ -1254,25 +1305,31 @@ class VitronEnergyDevice {
     app_version() {
         logger.debug("app version");
         //port.write(':352\n'); // application version
-        sendSimpleCommand('3', '1');
+        this.sendSimpleCommand('3', '1');
         // returns :1 05 43 0C ==> 0x4305 ==> version 3.05
         // 1 = Done
         // CS 0x55
-    };
+    }
 
-    restart() {
-        logger.debug("restart");
-        port.write(':64F\n'); 
-    };
-
+    productId() {
+	logger.debug("product id");
+	this.sendSimpleCommand('4', '1');
+	//port.write(':451\n'); // product ID
+	// returns :1 04 02 4E ==> 0x0204 ==> version 0x204 ==> BMV 702
+	// 1 = Done
+	// CS 0x55
+    }
+    
     registerListener(bmvdataKey, listener)
     {
-        bmvdata[bmvdataKey].on = listener;
+	if (bmvdataKey === "Checksum") this.on = listener;
+        else bmvdata[bmvdataKey].on = listener;
     }
     
     hasListener(bmvdataKey)
     {
-        return bmvdata[bmvdataKey].on !== null;
+	if (bmvdataKey === "Checksum") return this.on !== null;
+        else return bmvdata[bmvdataKey].on !== null;
     }
 
     update() {
@@ -1282,14 +1339,6 @@ class VitronEnergyDevice {
     close() {
         console.log("closing port");
         port.close();
-    }
-
-    add(item){
-        this._data.push(item);
-    }
-
-    get(id){
-        return this._data.find(d => d.id === id);
     }
 }
 
