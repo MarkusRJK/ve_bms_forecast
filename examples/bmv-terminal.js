@@ -505,9 +505,10 @@ var displayinterval = setInterval(function () {
 var readDeviceConfig = function()
 {
     logger.trace("readDeviceConfig");
-    fs.readFile(__dirname + '/config.json', 'utf8', function readFileCallback(err, data) {
+    const file = __dirname + '/config.json';
+    fs.readFile(file, 'utf8', (err, data) => {
 	if (err) {
-	    logger.error(err);
+	    logger.error(`cannot read: ${file} (${err.code === 'ENOENT' ? 'does not exist' : 'is not readable'})`);
         } else {
 	    logger.debug("Parse configuration (JSON format)");
 	    let config = JSON.parse(data);
