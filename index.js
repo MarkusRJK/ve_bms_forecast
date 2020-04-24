@@ -46,7 +46,7 @@
 //   [2020-04-17T13:26:06.061] [DEBUG] default - 'key' event:b; matches: b
 //   [2020-04-17T13:26:06.719] [ERROR] default - data set checksum: NaN (NaN) - expected: c4!
 //   [2020-04-17T13:26:07.229] [WARN] default - data set checksum: e5 (229) - expected: 4f (!
-
+// - debug.log is written into . and /var/log/.
 
 const Math = require('mathjs');
 var fs = require('fs');
@@ -216,30 +216,40 @@ class RegularUpdateChecksum {
 }
 
 
+var packageArrivalTime = 0;
+
+
+function updateCacheObject(obj, doLog) {
+    let change = new Object();
+    // FIXME: first test obj.newValue != null makes sense???
+    if (obj.newValue != null && obj.value !== obj.newValue)
+    {
+        let oldValue = obj.value;
+        obj.value = obj.newValue; // accept new values
+        // send event to listeners with values
+        // on() means if update applied,
+        
+        if (obj.on !== null) // && Math.abs(obj.value - obj.newValue) >= obj.precision)
+        {
+	    // FIXME: sort out packageArrivalTime
+            obj.on(obj.newValue, oldValue, obj.precision, packageArrivalTime);
+        }
+	change.newValue  = obj.newValue;
+	change.oldValue  = oldValue;
+	change.precision = obj.precision;
+        if (doLog) logger.debug(obj.shortDescr
+                                + " = " + oldValue
+                                + " updated with " + obj.newValue);
+    }
+    obj.newValue = null;
+    return change;
+}
+
 function updateValuesAndValueListeners(doLog) {
     logger.trace('updateValuesAndValueListeners');
     let mapOfChanges = {};
     for (const [key, obj] of Object.entries(map)) {
-        if (obj.newValue != null && obj.value !== obj.newValue)
-        {
-            let oldValue = obj.value;
-            obj.value = obj.newValue; // accept new values
-            // send event to listeners with values
-            // on() means if update applied,
-            
-            if (obj.on !== null) // && Math.abs(obj.value - obj.newValue) >= obj.precision)
-            {
-                obj.on(obj.newValue, oldValue, obj.precision, packageArrivalTime);
-            }
-	    mapOfChanges[key] = new Object();
-	    mapOfChanges[key].newValue  = obj.newValue;
-	    mapOfChanges[key].oldValue  = oldValue;
-	    mapOfChanges[key].precision = obj.precision;
-            if (doLog) logger.debug(obj.shortDescr
-                                    + " = " + oldValue
-                                    + " updated with " + obj.newValue);
-        }
-        obj.newValue = null;
+	mapOfChanges[key] = updateCacheObject(obj, doLog);
     }
     // FIXME: enable once updateValuesAndValueListeners is member of class VitronEl....
     //if (this.on !== null) this.on(mapOfChanges, packageArrivalTime);
@@ -251,21 +261,6 @@ function discardValues() {
     for (const [key, obj] of Object.entries(map)) {
         obj.newValue = null; // dump new values
     } 
-}
-
-function isCommandValid(cmd) {
-    logger.trace('isCommandValid');
-    // colon : was swallowed by split(':')
-    var rcs = append_checksum(":" + cmd.substring(0, cmd.length-2));
-    var expectedCS = rcs.substring(rcs.length-2, rcs.length);
-    var actualCS   = cmd.substring(cmd.length-2, cmd.length);
-    if (actualCS !== expectedCS)
-    {
-        logger.error("ERROR: command checksum: " + actualCS
-                    + " - expected: " + expectedCS);
-        return false;
-    }
-    return true;
 }
 
 // \brief Creates the endianess needed by the device
@@ -292,55 +287,7 @@ function endianSwap(hexStr, lengthInBytes)
 }
 
 
-function processCommand(cmd) {
-    cmd = cmd.split('\n')[0];
-    logger.trace("processCommand: response received " + cmd);
 
-    if (!isCommandValid(cmd)) return;
-
-    var cmdRegisterPrefix = cmd.substring(0, 5); // has no leading :
-    // FIXME: remove next line - just for checking what substring(0,5) is supposed to do
-    logger.trace("processCommand: response received " + cmdRegisterPrefix);
-    if (cmdRegisterPrefix in responseMap && responseMap[cmdRegisterPrefix] !== undefined)
-    {
-        clearTimeout(responseMap[cmdRegisterPrefix].timerId)
-        logger.debug(cmdRegisterPrefix + " in responseMap ==> clear timeout");
-        // the standard parser splits line by '\r\n'
-        // while a command response ends with '\n' only. 
-        // I.e. there may be a chunk of stuff after the \n 
-        // that needs to be split away.
-        responseMap[cmdRegisterPrefix].func(cmd);
-    }
-    else if (cmdRegisterPrefix[0] === "5" || // 5: reply to ping
-	     cmdRegisterPrefix[0] === "1")   // 1: reply to app version 
-    {
-	// TODO: assert(cmdRegisterPrefix.length > 4)
-	// returns e.g. 5 05 43 (without spaces) ==> value = 0x4305 ==> version 3.05
-	// or returns e.g. 1 05 43 for app version call
-	let value = endianSwap(cmdRegisterPrefix.substring(1, cmdRegisterPrefix.length), 2);
-	if (value[0] === "4") {
-	    let version = value[1] + "." + value.substring(2, 4);
-	    logger.info("Device software version " + version);
-	}
-	else logger.warn("Invalid reply to ping: " + cmdRegisterPrefix);
-        // CS is 0x55 - where and when is it tested?
-    }
-    else if (cmdRegisterPrefix === "40000") // reply after restart
-    {
-        logger.debug("restart successful");
-    }
-    else if (cmdRegisterPrefix === "AAAA")
-    {
-        logger.error("Framing error");
-    }
-    else
-    {
-        logger.warn("unwarrented command " + cmdRegisterPrefix + " received - ignored");
-    }
-    // TODO: check regularly for left overs in responseMap and cmdMessageQ
-}
-
-var packageArrivalTime = 0;
 var checksum = new RegularUpdateChecksum();
 
 function parse_serial(line) {
@@ -399,14 +346,16 @@ function parse_serial(line) {
 
         if (res[1].length === 0) return;
         // checksum value is followed by optional garbage and
-        // optional command response all in res[1].
+        // optional command responses all in res[1].
         // First char of res[1] contains checksum value so start from 1:
-        var cmdSplit = res[1].substring(1, res[1].length).split(':');
-        // none, one or several command responses can follow a frame.
+        // None, one or several command responses can follow a frame.
         // Command responses always start with : and end with \n.
+        var cmdSplit = res[1].substring(1, res[1].length).split(':');
+	// split "swallows" the colon : so each element cmdSplit
+	// has the format caaaammv...vss\n.
         var cmdIndex;
         for (cmdIndex = 1; cmdIndex < cmdSplit.length; ++cmdIndex) {
-            processCommand(cmdSplit[cmdIndex]);
+	    new Response(cmdSplit[cmdIndex]);
         }
     }
     else
@@ -439,6 +388,9 @@ function append_checksum(cmd) {
 // move declaration into class CommandMessageQ
 var responseMap = {};
 
+
+
+
 // \param address is a string and has the format 0x???? (uint16 with leading zeros if needed)
 // \param value as string, little endianed and filled with 0 from the left
 function createMessage(cmd, address, value) {
@@ -446,7 +398,7 @@ function createMessage(cmd, address, value) {
     logger.debug("===================================");
     logger.debug("cmd:          " + cmd);
     logger.debug("address:      " + address);
-    logger.debug("value:        " + value);
+    logger.debug("value:        0x" + value);
     // remove 0x prefix
     const flag = '00'; // flag always 00 for outgoing get and set
     const leAddress = address.substring(4, 6) + address.substring(2, 4) // address in little endian
@@ -456,26 +408,6 @@ function createMessage(cmd, address, value) {
     return command;
 }
 
-// \param response without leading : and trailing \n
-function messageState(response) {
-    logger.trace('messageState');
-    const state = parseInt(response.substring(5, 7));
-    switch (state) {
-    default:
-    case 0: // OK
-        break;
-    case 1: // Unknown ID
-        logger.error("Specific Id " + id + "does not exist");
-        break;
-    case 2: // Not supported
-        logger.error("Attempting to write to a read only value at " + id);
-        break;
-    case 4: // Parameter Error
-        logger.error("The new value " + value + " of " + id + " is out of range or inconsistent");
-        break;
-    }
-    return state;
-}
 
 var sendMessageDeferTimer = null;
 
@@ -592,13 +524,192 @@ function toEndianHexStr(value, lengthInBytes)
 //     parse_serial(line);
 // });
 
+
+
+// FIXME: re-describe comment if identifier stays with swapped address
+// \brief The command concatenated with the register address uniquely
+//        identify the response.
+// \detail a command is sent out of the format :caaaa00ss\n
+//        with c = this.command, a = this.address, ss the checksum.
+//        From all the responses the response starting with the same
+//        :caaaa.... carries the value. 
+function identifier(cmdStr) {
+    logger.trace("Response::identifier");
+    //return this.command + this.address;
+    return cmdStr.substring(0, 5);
+}
+
+function parseCommand(cmdStr) { return cmdStr[0]; }
+
+function parseAddress(cmdStr) {
+    let address = cmdStr.substring(1, 5);
+    return endianSwap(address, address.length / 2); // 2 bytes
+}
+
+function parseState(cmdStr) {
+    logger.trace('Response::parseState(' + cmdStr + ')');
+    let state = parseInt(cmdStr.substring(5, 7));
+    let id    = identifier(cmdStr);
+    let value = parseValue(cmdStr);
+    switch (state) {
+    default:
+    case isOK:
+        break;
+    case isUnknownID:
+        logger.error("Specific Id " + id + "does not exist");
+        break;
+    case isNotSupported:
+        logger.error("Attempting to write to a read only value at " + id);
+        break;
+    case isParameterError:
+        logger.error("The new value " + value + " of " + id + " is out of range or inconsistent");
+        break;
+    }
+    return state;
+}
+
+function parseValue(cmdStr) {
+    logger.trace("Response::parseValue(" + cmdStr + ")");
+    let value = cmdStr.substring(7, cmdStr.length-2);
+    let noOfBytes = Math.floor(value.length / 2);
+    value = endianSwap(value, noOfBytes); 
+    logger.debug("endianed hex value: " + value);
+    return value;
+}
+
+
+const pingCommand    = '5';
+const versionCommand = '1';
+const getCommand     = '7';
+const setCommand     = '8';
+
+// message state
+const isOK = 0;
+const isUnknownID = 1;
+const isNotSupported = 2;
+const isParameterError = 4;
+
+class Response {
+
+    constructor(cmdStr) {
+	logger.trace('Response::constructor(' + cmdStr + ")");
+	this.command = ""; // the Vitron command: 1, 3, 4, 6, 7 or 8
+	this.address = "";
+	this.state   = "";
+	this.value   = "";
+	this.id      = "";
+	this.parse(cmdStr);
+    }
+
+    toString() {
+	let r = "id: " + this.id;
+	switch (this.command) {
+	case versionCommand:
+	    r = "- version() => " + this.value;
+	    break;
+	case pingCommand:
+	    r = "- ping() => " + this.value;
+	    break;
+	case getCommand:
+	    r = "- get(" + this.address + ") => (" + this.value + ", " + this.state + ")";
+	    break;
+	case setCommand:
+	    r = "- set(" + this.address + ", " + this.value + ") => ("
+		+ this.value + ", " + this.state + ")";
+	    break;
+	}
+	return r;
+    }
+
+    getChecksum(cmd) { return cmd.substring(cmd.length-2, cmd.length); }
+
+    // \return true if Response's command is cmd
+    isCommand(cmd)   { return (this.command === cmd); }
+
+    // was isCommandValid...
+    // \return true if the response message was submitted correctly
+    isValid(cmd) {
+	logger.trace('Response::isCommandValid(' + cmd + ')');
+	let rcs = append_checksum(":" + cmd.substring(0, cmd.length-2));
+	let expectedCS = this.getChecksum(rcs);
+	let actualCS   = this.getChecksum(cmd);
+	if (actualCS !== expectedCS)
+	{
+            logger.error("command checksum: " + actualCS
+			 + " - expected: " + expectedCS);
+            return false;
+	}
+	return true;
+    }
+
+
+    // \param cmdStr has the format caaaammv..vss\n
+    //        where c is out of {1, 3, 4, 6, 7, 8}, aaaa is a 2-byte address,
+    //        mm is the 1-byte message status, v...v is a multi-byte value and
+    //        ss is the 1-byte checksum
+    parse(cmdStr) {
+	// the standard parser splits line by '\r\n'
+	// while a command response ends with '\n' only. 
+	// I.e. there may be a chunk of stuff after the \n 
+	// that needs to be split away.
+	// remove trailing \n (carriage return):
+	cmdStr = cmdStr.split('\n')[0]; // TODO: move outside into "cmdSplit"
+	logger.trace("Response::parse(" + cmdStr + ")");
+
+	if (!this.isValid(cmdStr)) return;
+
+	this.command = parseCommand(cmdStr);
+	this.address = parseAddress(cmdStr);
+	this.state   = parseState(cmdStr);
+	this.value   = parseValue(cmdStr);
+	this.id      = identifier(cmdStr);
+	
+	if (this.id in responseMap)
+	{
+	    clearTimeout(responseMap[this.id].timerId)
+	    logger.debug(this.id + " in responseMap ==> clear timeout");
+	    logger.debug("if the conv.hexToInt is not a function happens between here *****");
+	    responseMap[this.id].func(this);
+	    logger.debug("***** and here then it happens in execution of line 761");
+	}
+	else if (this.isCommand(pingCommand) || this.isCommand(versionCommand))
+	{
+	    // returns e.g. 5 05 43 (without spaces for ping) ==> value = 0x4305 ==> version 3.05
+	    // or returns e.g. 1 05 43 for app version call
+	    if (this.id.length > 4 && this.id[3] === "4") {
+		this.value = this.id[4] + "." + this.id.substring(1, 3);
+		logger.info("Device software version " + this.value);
+	    }
+	    else logger.warn("Invalid reply to ping: " + id);
+	    // CS is 0x55 - where and when is it tested?
+	}
+	else if (this.id === "40000") // reply after restart
+	{
+	    logger.debug("restart successful");
+	}
+	else if (this.id === "AAAA")
+	{
+	    logger.error("framing error");
+	}
+	else
+	{
+	    // FIXME: was this.id - does this now print the entire object? test!
+	    logger.warn("unwarrented command " + this + " received - ignored");
+	}
+	// TODO: check regularly for left overs in responseMap and cmdMessageQ
+    }
+}
+
+
+
 // \class CommandMessageQ is a queue of messages that contain commands
-// \brief a message is composed of the command and its parameters
-// \detail the command is the first 6 characters of a message
+// \brief A message is composed of the command and its parameters
+// \detail The messages are in the Q as final messages as to be send to
+//        the device, i.e. with the leading colon and trailing \n.
 class CommandMessageQ {
 
     constructor(){
-	logger.trace('CommandMessageQ::CommandMessageQ');
+	logger.trace('CommandMessageQ::constructor');
 	this.cmdMessageQ = [];
 	this.sendMessageDeferTimer = null;
 	this.deferalTimeInMs = 1000;
@@ -609,6 +720,7 @@ class CommandMessageQ {
 	// parameters) are "compressed" into one command with the parameters of
 	// the second message
 	this.cmdCompression = true;
+	this.maxResponseTime = 0;
 	this.open('/dev/serial/by-id/usb-VictronEnergy_BV_VE_Direct_cable_VE1SUT80-if00-port0');
     }
 
@@ -623,9 +735,23 @@ class CommandMessageQ {
     	this.port.write(':64F\n'); 
     }
 
+    // \brief  delete element indexNo in the Q
+    // \return the cmdMessageQ[indexNo]
+    delete(indexNo) {
+	let lastCmd;
+	if (indexNo >= 0 && indexNo < this.cmdMessageQ.length) {
+	    const lastCmd = (this.cmdMessageQ.splice(indexNo, 1))[0]; // finished work on this message - dump
+	    // take last char off which is \n
+	    logger.debug(lastCmd.substring(0, lastCmd.length-1) + "\\n processed - dequeing");
+	}
+	logger.debug("Cmd Q: " + this.cmdMessageQ.length);
+	return lastCmd;
+    }
+
     responseTimeoutHandler(cmdFrame) {
 	logger.trace('CommandMessageQ::responseTimeoutHandler');
 	const cmdRegisterPrefix = cmdFrame.substring(1, 6);
+	
 	logger.error("timeout - no response to "
                      + cmdFrame + " within "
                      + this.cmdResponseTimeoutMS + "ms");
@@ -652,101 +778,70 @@ class CommandMessageQ {
 	{
             const nextCmd = this.cmdMessageQ[0];
             logger.debug("Send next command in Q: " + nextCmd.substring(0, nextCmd.length-1));
+	    // FIXME: do we need to delete something from cmdMessageQ??
             this.runMessageQ();
 	}
     }
 
-    // \param response received from port without leading : and trailing \n
-    messageState(response) {
-	logger.trace('CommandMessageQ::messageState');
-	const state = parseInt(response.substring(5, 7));
-	switch (state) {
-	default:
-	case 0: // OK
-            break;
-	case 1: // Unknown ID
-            logger.error("Specific Id " + id + "does not exist");
-            break;
-	case 2: // Not supported
-            logger.error("Attempting to write to a read only value at " + id);
-            break;
-	case 4: // Parameter Error
-            logger.error("The new value " + value + " of " + id + " is out of range or inconsistent");
-            break;
-	}
-	return state;
-    }
-
-
+    // \param response is an object of type Response
+    // \post  at every exit of responseHandler the Q must be run with the remaining elements
+    // \return -2 means the response does not map any queued command
+    //        -1 response contained an error
+    //        0 response is OK
     responseHandler(response) {
-	logger.trace("CommandMessageQ::responseHandler(" + response + ")");
+	let retval = 0;
+	let receivedTime = new Date();
+	this.maxResponseTime = Math.max(this.maxResponseTime,
+					receivedTime - responseMap[response.id].sentTime);
+	logger.trace("CommandMessageQ::responseHandler: " + response.toString());
 	// response contains the message without leading : and trailing \n
 	let lastCmdQIndex;
 	for (lastCmdQIndex = 0; lastCmdQIndex < this.cmdMessageQ.length; ++lastCmdQIndex)
 	{
-	    if (response.substring(0, 5) === this.cmdMessageQ[lastCmdQIndex].substring(1, 6))
+	    if (response.id === this.cmdMessageQ[lastCmdQIndex].substring(1, 6))
 	    {
 		break; // jump out of the loop without increasing i
 	    }
 	}
 	if (lastCmdQIndex === this.cmdMessageQ.length)
 	{
-	    logger.error("response " + response
+	    logger.error("response " + response.id
 			 + " does not map any queued command: ");
 	    if (this.cmdMessageQ.length === 0)
 		logger.error("MessageQ empty");
 	    else {
-		for (lastCmdQIndex = 0; lastCmdQIndex < this.cmdMessageQ.length; ++lastCmdQIndex)
-		{
-		    // FIXME: remove last char in cmdMessageQ[] because it is \n
-		    logger.error(this.cmdMessageQ[lastCmdQIndex]);
-		}
+		logger.error("MessageQ is:");
+		this.cmdMessageQ.map(c => logger.error(c.substring(0, c.length-1)));
 	    }
-	    return -2;
+	    retval = -2;
 	}
-	// check flag
-	let flag = "00";
-        if (this.messageState(response) !== 0) return -1;
-        let strValue = response.substring(7, response.length-2);
-        let valuesNumberOfBytes = strValue.length/2;
-        strValue = endianSwap(strValue, valuesNumberOfBytes);
-        logger.debug("endianed hex value: " + strValue);
-        const address = "0x" + response.substring(3, 5) + response.substring(1, 3);
-        if (address in addressCache)
-        {
-	    addressCache[address].newValue = addressCache[address].fromHexStr(strValue);
-	    logger.debug("response for "
-                         + addressCache[address].shortDescr + ' (old: ' +
-                         + addressCache[address].value + ") - new value: " +
-                         + addressCache[address].newValue);
-	    //copied from updateValuesAndValueListeners(true); since it cannot be used !!! causes issues
-	    if (addressCache[address].value !== addressCache[address].newValue)
-	    {
-                let oldValue = addressCache[address].value;
-                addressCache[address].value = addressCache[address].newValue; // accept new values
-                // send event to listeners with values
-                // on() means if update applied,
-		
-                if (addressCache[address].on !== null) // && Math.abs(obj.value - obj.newValue) >= obj.precision)
-                {
-		    addressCache[address].on(addressCache[address].newValue, oldValue, addressCache[address].precision, packageArrivalTime);
-                }
-                addressCache[address].newValue = null;
-	    }
-        }
-        else {
-	    logger.warn(address + " is not in addressCache");
-	    // FIXME: the creation of a new object? Does it make sense?
-	    addressCache[address] = new Object();
-	    addressCache[address].newValue = conv.hexToUint(strValue);
-        }
+
+        if (retval === 0 && response.state !== 0) {
+	    retval = -1;
+	}
+
+	if (retval === 0) {
+            const address = "0x" + response.address;
+            if (address in addressCache)
+            {
+		addressCache[address].newValue = addressCache[address].fromHexStr(response.value);
+		logger.debug("response for " + address);
+		updateCacheObject(addressCache[address], true); // ignore returned object
+            }
+            else {
+		logger.warn(address + " is not in addressCache");
+		// FIXME: the creation of a new object? Does it make sense?
+		addressCache[address] = new Object();
+		addressCache[address].newValue = conv.hexToUint(strValue);
+            }
+	}
 	//TODO: if response does not match expected response sendMsg(message, priority) again.
-	const lastCmd = (this.cmdMessageQ.splice(lastCmdQIndex, 1))[0]; // finished work on this message - dump
-	// take last char off which is \n
-	logger.debug(lastCmd.substring(0, lastCmd.length-1) + "\\n processed - dequeing");
-	logger.debug("Cmd Q: " + this.cmdMessageQ.length);
-	delete responseMap[response.substring(0, 5)];
+	this.delete(lastCmdQIndex);
+
+	delete responseMap[response.id]; // FIXME: should we leave it in the responseMap and clean it e.g. every 10min
+
 	this.runMessageQ();
+	return retval;
     }
 
     getResponse(cmdFrame) {
@@ -774,6 +869,7 @@ class CommandMessageQ {
 				   func:    resolve.bind(this),
 				   timerId: tid,
 				   doRetry: newRetries,
+				   sentTime: new Date(),
 			       };
 			       that.port.write(cmdFrame);
 			       logger.debug(cmdFrame.substring(0, cmdFrame.length-1)
@@ -858,6 +954,7 @@ class CommandMessageQ {
 		// first is currently executed --> leave at position 0
 		let first = this.cmdMessageQ.shift();
 		// insert message at position 1
+		// FIXME: needs to scroll through all prio 1 message and put it as last prio 1!!!
 		this.cmdMessageQ.unshift(first, message);
 		// it is possible that this.cmdMessageQ and message are the same command
 		// (with same or different parameters). However we cannot compress
@@ -919,7 +1016,6 @@ class CommandMessageQ {
         this.Q_push_back(message, priority);
 	if (isQEmpty)
 	{
-            // TODO: this.cmdMessageQ empty ==> clear responseMap
             this.runMessageQ();
 	}
 	else if (timeoutInMs !== 0)
@@ -947,7 +1043,7 @@ class CommandMessageQ {
 			       // FIXME: remove last char of firstCmdInQ because it is \n
 			       logger.warn(firstCmdInQ + " timed out ==> removing from Q");
 			       this.cmdMessageQ.shift(); // remove firstCmdInQ from Q
-			       delete responseMap[fristCmdInQ.substring(1, 6)];
+			       delete responseMap[firstCmdInQ.substring(1, 6)];
 			       this.runMessageQ();
 			   }
 		       }.bind(this), timeoutInMs);
@@ -994,8 +1090,8 @@ class CommandMessageQ {
     }
 
     close() {
-	logger.trace('CommandMessageQ::sendSimpleCommand');
-        console.log("closing port");
+	logger.trace('CommandMessageQ::close');
+	logger.debug('Max. command response time: ' + this.maxResponseTime + ' ms');
         port.close();
     }
 
@@ -1008,7 +1104,7 @@ class CommandMessageQ {
 class VitronEnergyDevice {
 
     constructor(){
-	logger.trace('VitronEnergyDevice::VitronEnergyDevice');
+	logger.trace('VitronEnergyDevice::constructor');
         // set isRecording true to record the incoming data stream to record_file
         this.isRecording = false;
 	this.cmdMessageQ = [];
@@ -1027,6 +1123,10 @@ class VitronEnergyDevice {
 	this.cmdQ.restart();
     }
 	
+    stop() {
+	if (this.cmdQ) this.cmdQ.close();
+    }
+
     get(address, priority, timeoutInMs) {
 	logger.trace('VitronEnergyDevice::get(address): ' + address);
 	const message = createMessage('7', address, '');
@@ -1410,6 +1510,9 @@ class VitronEnergyDevice {
     // \param mode 0 = default, 1 = charge, 2 = remote
     set_relay_mode(mode) {
     	logger.trace("VitronEnergyDevice::set relay mode");
+
+	if (Math.floor(parseInt(addressCache["0x034F"].value)) === mode) return;
+	
 	// FIXME: set priority 1 (bug: currently not working)
 	if (mode === 0)
 	    this.set("0x034F", "00", 0, 0);
@@ -1424,7 +1527,13 @@ class VitronEnergyDevice {
 	//        the setRelay before setting the mode!!! Fix: save prioritization
 	//        in cmdMessageQ and do not allow them being pushed.
         logger.trace("VitronEnergyDevice::set relay");
+	// FIXME: for being generic, this should be done outside
         this.set_relay_mode(2);
+
+	let currentMode = 0;
+	if (addressCache["0x034E"].value === "ON") currentMode = 1;
+	if (addressCache["0x034E"].value !== null && currentMode === mode) return;
+
 	// FIXME: set priority 1 (bug: currently not working)
         if (mode === 0)
             this.set("0x034E", "00", 0, 0);

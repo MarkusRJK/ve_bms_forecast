@@ -225,7 +225,7 @@ function register(key, nativeToUnitFactor, units, shortDescr, options) {
     map[key].shortDescr = shortDescr;
     // format and scale from raw value to unit-value with given precision
     map[key].formatted = function() {
-	if (this.nativeToUnitFactor === 0) return this.value;
+	if (this.value === null || this.nativeToUnitFactor === 0) return this.value;
 	var scaledToIntPrecision = Number(this.value * this.nativeToUnitFactor / this.precision);
 	var div = 1 / this.precision;
 	// TODO: use toFixed  

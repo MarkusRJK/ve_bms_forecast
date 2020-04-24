@@ -535,7 +535,10 @@ term.on( 'key' , function( name , matches , data ) {
     logger.debug( "'key' event:" + name + "; matches: " + matches);
     term.clear();
 
-    if ( name === 'CTRL_C' ) { terminate() ; }
+    if ( name === 'CTRL_C' ) {
+	vedirect.stop();
+	terminate() ;
+    }
     //if ( matches.indexOf( 'CTRL_C' ) >= 0 ) terminate() ;
     name = name.toUpperCase()
     if ( name === 'R' )
