@@ -13,3 +13,9 @@ exports.hexToSint = function(hex) {
 exports.hexToUint = function(hex) {
     return parseInt(hex, 16);
 }
+
+exports.hexToOnOff = function(hex) {
+    if (parseInt(hex, 16) == 0)
+	return 'OFF';
+    else return 'ON';
+}

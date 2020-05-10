@@ -216,7 +216,7 @@ function register(key, nativeToUnitFactor, units, shortDescr, options) {
 	map[key] = new Object();
 	logger.debug("Creating new object for " + key);
     };
-    map[key].value = null; // FIXME: use undefined rather than null
+    map[key].value = null;
     map[key].newValue = null;
     // choose 0 for strings
     map[key].nativeToUnitFactor = nativeToUnitFactor;
@@ -288,7 +288,6 @@ function register(key, nativeToUnitFactor, units, shortDescr, options) {
 };
 
 
-
 function map_components() {
     logger.trace("Registering");
     // component:  your given name
@@ -322,12 +321,7 @@ function map_components() {
     bmvdata.loadCurrent         = register('IL',    0.001,  "A",   "Load Current");
     // MPPT - returns string 'ON' or 'OFF'
     bmvdata.load                = register('LOAD',  0,      "",    "Load Output State",
-					   { 'fromHexStr': (hex) =>
-                                                           { 
- 							       if (conv.hexToInt(hex) == 0)
-								   return 'OFF';
-							       else return 'ON';
-                                                           } });
+					   { 'fromHexStr': conv.hexToOnOff });
 
 
     // BMV600, BMV700, MPPT, Phoenix Inverter - Display: MAIN; Type: Sn16; Unit: 0.01V!!!
@@ -534,23 +528,15 @@ function map_components() {
     // BMV600, BMV700 - returns string 'ON' or 'OFF'
     bmvdata.alarmState          = register('Alarm', 0,   "",       "Alarm state",
 					   {'description': "Alarm condition active",
-					    'fromHexStr':  (hex) =>
-                                                           { 
- 							       if (conv.hexToInt(hex) == 0)
-								   return 'OFF';
-							       else return 'ON';
-                                                           } });
+					    'fromHexStr': conv.hexToOnOff
+					   });
 
     addressCache['0xEEFC']      = bmvdata.alarmReason;
 
     // BMV600, BMV700, SmartSolar MPPT - returns string 'ON' or 'OFF'
     bmvdata.relayState          = register('Relay', 0,   "",       "Relay state",
-					   { 'fromHexStr': (hex) => { 
-							       // FIXME: Reject: conv.hexToInt is not a function - when called from responseHandler/promise
- 							       if (conv.hexToInt(hex) == 0)
-								   return 'OFF';
-							       else return 'ON';
-                                           } });
+					   { 'fromHexStr': conv.hexToOnOff
+                                           });
 
     // FIXME: how does this value behave with the inversion of the relay?
     addressCache['0x034E']      = bmvdata.relayState;
@@ -599,7 +585,7 @@ function map_components() {
     addressCache['0x1009']      = bmvdata.relayLowSOCClear;
 
     bmvdata.userCurrentZero     = register('UCZ',   1,    "",      "User current zero",
-					   { 'fromHexStr': conv.hexToInt });
+					   { 'fromHexStr': conv.hexToSint });
     addressCache['0x1034']      = bmvdata.userCurrentZero;
 
     // Additional declarations:
