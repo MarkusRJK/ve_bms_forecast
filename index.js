@@ -5,16 +5,13 @@
 //'use strict';
 
 // TODO:
-// - fix: logs are empty after introducing class Vitodron...
 // - cope with unplugged cable:
 //    events.js:183
 //      throw er; // Unhandled 'error' event
 //      ^
 //
 //    Error: Error: No such file or directory, cannot open /dev/serial/by-id/usb-VictronEnergy_BV_VE_Direct_cable_VE1SUT80-if00-port0
-// - logging uses american date format (mm/dd/yy) and am/pm - arrrghh
 // - use soc closest to zero current of last x min
-// - introduce force cmds that repeat + reset until done (done)
 // - introduce optional read from cache
 // - first parse: parse until checksum ok then create objects from it for cache - only then do the up/download of config
 // - further parse: replace callback function by final parse function to do updates
@@ -23,22 +20,15 @@
 // - remove map key from objects and do it like addressCache
 // - iterate over bmvdata rather than map as bmvdata shall have all entries
 // - response from BMV to set command: also compare returned value
-// - make address class that handles adresses for display and use (endian swapping)
 // - make on a list so many callbacks can be called: callbacks = []; callback.push(..); callback.find(x)
-// - add timestamp when new package arrives
 // - ensure setTimeout within class works
-// - classes for CmdChecksum, Address, MessageQ
+// - classes for Send and Receive
 
 // FIXES needed:
 // - message times out and is removed from responseMap but then
 //        may still arrive (not being found in repsonseMap -> TODO: timeoutmap???
 // - abandon sendsimplecommand since it works around the Q (does not use all mechanisms)
-// - do not allow prioritized messages to be pushed in cmdMessageQ
 // - read relay mode at startup and check cache in later stages whether it needs to be set
-// - case setSOC was sent then setrelaymode queued with prio 1 then setrelay with prio 1
-//   which got pushed before setrelaymode. Then processCommand deleted soc from
-//   responsemap while responseHandler shifted the setRelay command of the cmdMessageQ
-//   which was for some reason the first (consolidate cmdMessageQ and responseMap!)
 // - response ... does not map any queued command:
 // - restart (boot) delivers no checksum?!
 //   [2020-04-17T13:26:06.061] [DEBUG] default - 'key' event:b; matches: b
@@ -167,6 +157,11 @@ var addressCache = deviceCache.addressCache;
 //       are not delivered with the 1-second-update package. I.e.
 //       the following:
 
+// \return str trimming off anything beyond \n incl. if exists
+function trim(str) {
+    return str.split('\n')[0];
+}
+
 
 class RegularUpdateChecksum {
     constructor() {
@@ -291,9 +286,17 @@ var checksum = new RegularUpdateChecksum();
 function parse_serial(line) {
     logger.trace('parse_serial');
     let res = line.split("\t");
-    if (!res[0] || res[0] === "") return; // empty string
-   
-    if (res[0] === "Checksum")
+    if (!res[0] || res[0] === "")
+    {
+	if (res[1] && res[1].length > 1 && res[1].substring(1, res[1].length).split(':'))
+	{
+	    logger.warn("Content found after tab without key");
+	}
+	return; // empty string
+    }
+
+    const checksumKey = "Checksum";
+    if (res[0] === checksumKey)
     {
 	// Calculating checksum of "Checksum\t" (word Checksum + tab)
 	//
@@ -309,7 +312,9 @@ function parse_serial(line) {
 	let expectedCS = (256 - (checksum.get() % 256) + 196) % 256; // Checksum+\t
 	if (expectedCS < 0) { expectedCS = expectedCS + 256; }
 
-	let cs = checksum.update(line);
+	// line may contain garbage after the checksum, therefore
+	// restrict the line to the checksumKey plus tab plus the checksum value
+	let cs = checksum.update(line.substring(0, checksumKey.length + 2));
         cs = cs % 256;
         if (cs === 0) // valid checksum for periodic frames
         {
@@ -318,23 +323,20 @@ function parse_serial(line) {
         else // checksum invalid
         {
             discardValues();
-	    const outStr = "data set checksum: " 
-                  + res[1].charCodeAt(0).toString(16) + ' ('
-                  + res[1].charCodeAt(0)
-                  + ") - expected: " + expectedCS.toString(16)
+	    const expStr = " - expected: 0x" + expectedCS.toString(16)
                   + ' (' + expectedCS + ')';
-	    if (res[1].length === 0) 
-		logger.error("data set checksum: " 
-                             + res[1].charCodeAt(0).toString(16) + ' ('
-                             + res[1].charCodeAt(0)
-                             + ") - expected: " + expectedCS.toString(16)
-                             + ' (' + expectedCS + ')');
-	    else
-		logger.warn("data set checksum: " 
-                             + res[1].charCodeAt(0).toString(16) + ' ('
-                             + res[1].charCodeAt(0)
-                             + ") - expected: " + expectedCS.toString(16)
-                             + ' (' + expectedCS + ')');
+	    const prefix = "data set checksum: ";
+	    if (res[1].length === 0)
+	    {
+		logger.error(prefix + "checksum missing" + expStr);
+	    }
+	    else // in case a response arrived, checksum is mostly invalid => no error
+	    {
+		const isStr = "0x" + res[1].charCodeAt(0).toString(16) + ' ('
+                      + res[1].charCodeAt(0)
+                      + ")";
+		logger.warn(prefix + isStr + expStr);
+	    }
         }
 	packageArrivalTime = 0;
         checksum.reset(); // checksum field read => reset checksum
@@ -342,7 +344,9 @@ function parse_serial(line) {
         // or before a command response arrives.
         // Check for command response now:
 
-        if (res[1].length === 0) return;
+	// res[1] contain the checksum of the previous frequent update package,
+	// and at least the : and the command
+        if (res[1].length <= 3) return;
         // checksum value is followed by optional garbage and
         // optional command responses all in res[1].
         // First char of res[1] contains checksum value so start from 1:
@@ -353,11 +357,16 @@ function parse_serial(line) {
 	// has the format caaaammv...vss\n.
         var cmdIndex;
         for (cmdIndex = 1; cmdIndex < cmdSplit.length; ++cmdIndex) {
+	    logger.debug("Creating response for " + cmdSplit[cmdIndex]);
 	    new Response(cmdSplit[cmdIndex]);
         }
     }
     else
     {
+	// a line consist of:
+	// field name + tab + field value + return
+	// the "return is consumed outside parse_serial by the readline command
+	// the "tab" is consumed by the split command at the top of this function
 	checksum.update(line);
         if (res[0] === undefined) return;
 	if (packageArrivalTime === 0) packageArrivalTime = new Date();
@@ -382,30 +391,21 @@ function append_checksum(cmd) {
     return cmd + ("0" + checksum.toString(16)).slice(-2).toUpperCase();
 }
 
+function append_checksumNew(cmd) {
+    logger.trace('append_checksumNew');
+    var command = "0" + cmd;
+
+    const byteInHex = command.split('').map(c => parseInt(c, 16));
+    var checksum = byteInHex.reduce((total, hex, index) =>
+                    (index % 2 === 0 ? total + hex * 16 : total + hex), 0);
+    checksum = (0x55 - checksum) % 256;
+    if (checksum < 0) checksum += 256;
+    return cmd + ("0" + checksum.toString(16)).slice(-2).toUpperCase();
+}
+
 
 // move declaration into class CommandMessageQ
 var responseMap = {};
-
-
-
-
-// \param address is a string and has the format 0x???? (uint16 with leading zeros if needed)
-// \param value as string, little endianed and filled with 0 from the left
-function createMessage(cmd, address, value) {
-    logger.trace('createMessage');
-    logger.debug("===================================");
-    logger.debug("cmd:          " + cmd);
-    logger.debug("address:      " + address);
-    logger.debug("value:        0x" + value);
-    // remove 0x prefix
-    const flag = '00'; // flag always 00 for outgoing get and set
-    const leAddress = address.substring(4, 6) + address.substring(2, 4) // address in little endian
-    //FIXME: value needs to be endian "swapped"
-    let command = ':' + cmd + leAddress + flag + value;
-    command = append_checksum(command) + '\n';
-    return command;
-}
-
 
 var sendMessageDeferTimer = null;
 
@@ -503,14 +503,6 @@ function toEndianHexStr(value, lengthInBytes)
 
 
 
-//:74F030000FC
-// relay is dflt
-
-
-
-
-
-
 // var readline = require('readline');
 
 // var myInterface = readline.createInterface({
@@ -544,12 +536,13 @@ class Message {
     //        where c ...
     constructor(cmdStr) {
 	logger.trace('Message::constructor(' + cmdStr.substring(0, cmdStr.length-1) + ")");
+	cmdStr = cmdStr.split('\n')[0];
 	this.cmdStr  = cmdStr; // raw command string with leading : and trailing \n
-	this.command = null; // the Vitron command: 1, 3, 4, 6, 7, 8 or A
-	this.address = null; // 2 byte, as string in hex format
-	this.state   = null; // 1 byte, as string in hex format
-	this.value   = null; // 1-4 byte, as string in hex format
-	this.id      = null; // concatenation of command and endianSwapped(address)
+	this.command = null;   // the Vitron command: 1, 3, 4, 6, 7, 8 or A
+	this.address = null;   // 2 byte, as string in hex format
+	this.state   = null;   // 1 byte, as string in hex format
+	this.value   = null;   // 1-4 byte, as string in hex format
+	this.id      = null;   // concatenation of command and endianSwapped(address)
 	this.parse(cmdStr);
     }
 
@@ -572,20 +565,11 @@ class Message {
 	}
 	return r;
     }
-
-    // FIXME: where should this description go?
-    // \brief The command concatenated with the endian swapped register address uniquely
-    //        identify the response.
-    // \detail a command is sent out of the format :caaaa00ss\n
-    //        with c = this.command, a = this.address, ss the checksum.
-    //        From all the responses the response starting with the same
-    //        :caaaa.... carries the value.
-
     
     // \param cmdStr the command without the leading : and trailing \n, i.e. caaaaffv..vvss
     // \return identifier
     parseIdentifier(cmdStr) {
-	logger.trace('Response::parseIdentifier(' + cmdStr + ')');
+	logger.trace('Message::parseIdentifier(' + cmdStr + ')');
 	//return this.command + this.address;
 	return cmdStr.substring(0, 5);
     }
@@ -595,14 +579,14 @@ class Message {
 
     // \return address
     parseAddress(cmdStr) {
-	logger.trace('Response::parseAddress(' + cmdStr + ')');
+	logger.trace('Message::parseAddress(' + cmdStr + ')');
 	const address = cmdStr.substring(1, 5);
 	return endianSwap(address, address.length / 2); // 2 bytes
     }
 
     // \return message state
     parseState(cmdStr) {
-	logger.trace('Response::parseState(' + cmdStr + ')');
+	logger.trace('Message::parseState(' + cmdStr + ')');
 	const state = parseInt(cmdStr.substring(5, 7));
 	const id    = this.getId();
 	const value = this.getValue();
@@ -611,7 +595,7 @@ class Message {
 	case isOK:
             break;
 	case isUnknownID:
-            logger.error("Specific Id " + id + "does not exist");
+            logger.error("Specific Id " + id + " does not exist");
             break;
 	case isNotSupported:
             logger.error("Attempting to write to a read only value at " + id);
@@ -625,7 +609,7 @@ class Message {
 
     // \return value swapped, converted to int ready for use
     parseValue(cmdStr) {
-	logger.trace("Response::parseValue(" + cmdStr + ")");
+	logger.trace("Message::parseValue(" + cmdStr + ")");
 	let value = cmdStr.substring(7, cmdStr.length-2);
 	let noOfBytes = Math.floor(value.length / 2);
 	value = endianSwap(value, noOfBytes); 
@@ -684,7 +668,7 @@ class Message {
     }
 
     getMessage() {
-	return this.cmdStr;
+	return ':' + this.cmdStr;
     }
 }
 
@@ -706,6 +690,7 @@ class Response extends Message {
     // \return true if the response message was submitted correctly
     isValid(cmd) {
 	logger.trace('Response::isCommandValid(' + cmd + ')');
+	if (cmd.length < 3) return false;
 	const rcs = append_checksum(":" + cmd.substring(0, cmd.length-2));
 	const expectedCS = this.getChecksum(rcs);
 	const actualCS   = this.getChecksum(cmd);
@@ -729,14 +714,14 @@ class Response extends Message {
 	// I.e. there may be a chunk of stuff after the \n 
 	// that needs to be split away.
 	// remove trailing \n (carriage return):
-	cmdStr = cmdStr.split('\n')[0]; // TODO: move outside into "cmdSplit"
+	cmdStr = cmdStr.split('\n')[0]; // TODO: move outside into "cmdSplit" and use trim
 	logger.trace("Response::parse(" + cmdStr + ")");
 
 	if (!this.isValid(cmdStr)) return;
 
 	super.parse(cmdStr);
 	
-	if (this.id in responseMap)
+	if (this.getId() in responseMap)
 	{
 	    clearTimeout(responseMap[this.id].timerId)
 	    logger.debug(this.id + " in responseMap ==> clear timeout");
@@ -762,7 +747,12 @@ class Response extends Message {
 	{
 	    logger.debug("restart successful");
 	}
-	else if (cmdStr.substring(0, 4) === "AAAA") // FIXME: id should always have length 5
+	// BMV-7xx HEX Protocol describes that the device returns "AAAA" in case
+	// of a framing error, however, experiments showed that the response
+	// to a framing error looks like "2AAAA". The following implementation
+	// caters both cases:
+	else if (cmdStr.substring(0, 4) === "AAAA"
+		 || cmdStr.substring(0, 5) === "2AAAA")
 	{
 	    logger.error("framing error");
 	}
@@ -775,6 +765,60 @@ class Response extends Message {
     }
 }
 
+class Command extends Message {
+
+    // \param address is a string of the form 0xzzzz in hexadecimal format
+    //        with 2 byte
+    // \param priority is 0 or 1, 1 is prefered execution,
+    //        if no priority is given 0 is assumed
+    constructor(cmd, address, value, priority, maxRetries) {
+	super('');
+	logger.trace('Command::constructor(' + cmd + ", " + address + ", " + value + ")");
+	address         = address.substring(2, address.length);
+	if (priority)   this.priority = priority;
+	else            this.priority = 0; // default priority
+	if (maxRetries) this.maxRetries = maxRetries;
+	else            this.maxRetries = 3; // default retries
+	this.cmdStr     = this.createMessage(cmd, address, value);
+	super.parse(this.cmdStr);
+    }
+
+    getPriority() {
+	return this.priority;
+    }
+
+    setPriority(p) {
+	this.priority = p;
+    }
+
+    // \param cmd is out of {pingCommand, versionCommand, getCommand, setCommand, asyncSetCommand}
+    // \note 2020-05-06: async commands not working with my version of BMV FW: reply is 30A00
+    // \param address is a string and has the format 0x???? (uint16 with leading zeros if needed)
+    // \param value as string, little endianed and filled with 0 from the left
+    // \return a message of the format caaaammv..vss\n
+    //        where c is out of {1, 3, 4, 6, 7, 8}, aaaa is a 2-byte address,
+    //        mm is the 1-byte message status, v...v is a multi-byte value and
+    //        ss is the 1-byte checksum
+    createMessage(cmd, address, value) {
+	logger.trace('Command::createMessage');
+	logger.debug("===================================");
+	logger.debug("cmd:          " + cmd);
+	logger.debug("address:      0x" + address);
+	logger.debug("value:        0x" + value);
+	// remove 0x prefix
+	//const leAddress = address.substring(2, 4) + address.substring(0, 2) // address in little endian
+	const leAddress = endianSwap(address, 2);
+	//FIXME: value needs to be endian "swapped"
+	//let command = ':' + cmd + leAddress + this.state + value;
+	// the state (flag) of a command is always 00 for outgoing messages
+	let command = cmd + leAddress + "00" + value;
+	command = append_checksumNew(command) + '\n';
+	command = command.toUpperCase();
+	logger.debug("message:      " + trim(command));
+	return command;
+    }
+
+}
 
 
 // \class CommandMessageQ is a queue of messages that contain commands
@@ -788,8 +832,9 @@ class CommandMessageQ {
 	this.cmdMessageQ = [];
 	this.sendMessageDeferTimer = null;
 	this.deferalTimeInMs = 1000;
-	// measured avg response time approx. 3873ms
+	// measured max response time approx. 3984ms
 	this.cmdResponseTimeoutMS = 6000; // milliseconds
+	// FIXME: cmdMaxRetries needed in Q class (now in Command class)
 	this.cmdMaxRetries = 3;
 	// two subsequent messages with the same command (and possible different
 	// parameters) are "compressed" into one command with the parameters of
@@ -808,6 +853,7 @@ class CommandMessageQ {
 
     restart() {
     	logger.trace("CommandMessageQ::restart");
+	logger.debug("CommandMessageQ::restart"); // FIXME temporary as debug
     	this.port.write(':64F\n'); 
     }
 
@@ -818,7 +864,7 @@ class CommandMessageQ {
 	if (indexNo >= 0 && indexNo < this.cmdMessageQ.length) {
 	    lastCmd = (this.cmdMessageQ.splice(indexNo, 1))[0]; // finished work on this message - dump
 	    // take last char off which is \n
-	    logger.debug(lastCmd.substring(0, lastCmd.length-1) + "\\n processed - dequeing");
+	    logger.debug(trim(lastCmd.getMessage()) + "\\n processed - dequeing");
 	}
 	logger.debug("Cmd Q: " + this.cmdMessageQ.length);
 	return lastCmd;
@@ -843,12 +889,12 @@ class CommandMessageQ {
 		// FIXME: don't delete but mark as timedout in case message still arrives
 		delete responseMap[responseId];
 
-		let   cmdQIndex = this.find(responseId);
+		let cmdQIndex = this.find(responseId);
 		if (cmdQIndex !== this.cmdMessageQ.length)
 		{
 		    this.delete(cmdQIndex); // finished work on this message - dump
 		}
-		logger.debug("Cmd Q: " + this.cmdMessageQ.length);
+		else logger.debug("Cmd Q: " + this.cmdMessageQ.length);
 		//reject(new Error('timeout - no response received within 30 secs'));
 		sendTypeStr = "Sending next command ";
             }
@@ -859,8 +905,9 @@ class CommandMessageQ {
 	
 	if (this.cmdMessageQ.length > 0)
 	{
+	    this.cmdMessageQ[0].setPriority(1);
             const nextCmd = this.cmdMessageQ[0];
-            logger.debug(sendTypeStr + ": " + nextCmd.substring(0, nextCmd.length-1));
+            logger.debug(sendTypeStr + ": " + trim(nextCmd.getMessage()));
 	    // FIXME: do we need to delete something from cmdMessageQ??
             this.runMessageQ();
 	}
@@ -870,7 +917,7 @@ class CommandMessageQ {
 	let cmdQIndex;
 	for (cmdQIndex = 0; cmdQIndex < this.cmdMessageQ.length; ++cmdQIndex)
 	{
-	    if (responseId === this.cmdMessageQ[cmdQIndex].substring(1, 6))
+	    if (responseId === this.cmdMessageQ[cmdQIndex].getId())
 	    {
 		break; // jump out of the loop without increasing i
 	    }
@@ -883,7 +930,7 @@ class CommandMessageQ {
 		logger.error("MessageQ empty");
 	    else {
 		logger.error("MessageQ is:");
-		this.cmdMessageQ.map(c => logger.error(c.substring(0, c.length-1)));
+		this.cmdMessageQ.map(c => logger.error(trim(c.getMessage())));
 	    }
 	}
 	return cmdQIndex;
@@ -918,7 +965,7 @@ class CommandMessageQ {
             {
 		// TODO: add sentTime, receivedTime fields to each object
 		addressCache[address].newValue = addressCache[address].fromHexStr(response.value);
-		logger.debug("response for " + address);
+		logger.debug("response for " + address + ": updating cache");
 		updateCacheObject(addressCache[address], true); // ignore returned object
             }
             else {
@@ -937,6 +984,9 @@ class CommandMessageQ {
 	return retval;
     }
 
+    // TODO: rename to \param response is of class Command FIXME: should it not be class Response?
+    // FIXME: replace command to getResponseTo(command)
+    // \param cmdFrame looks like: :caaaaffvv..ss\n
     getResponse(cmdFrame) {
 	logger.trace("CommandMessageQ::getResponse(" + cmdFrame.substring(0, cmdFrame.length-1) + ")");
 	let that = this;
@@ -954,7 +1004,8 @@ class CommandMessageQ {
 				   }, that.cmdResponseTimeoutMS, response);
 
 			       logger.debug("Timeout set to " + that.cmdResponseTimeoutMS
-					    + "ms for " + responseId);
+					    + "ms for " + responseId)
+			       // FIXME: take max retries from incoming cmdframe (to be delivered as class Command object
 			       let newRetries = that.cmdMaxRetries;
 			       if (responseId in responseMap)
 				   newRetries = responseMap[responseId].doRetry-1;
@@ -981,8 +1032,9 @@ class CommandMessageQ {
 		if (this.sendMessageDeferTimer != null) {
                     clearTimeout(this.sendMessageDeferTimer);
 		}
+		this.cmdMessageQ[0].setPriority(1);
 		const nextCmd = this.cmdMessageQ[0];
-
+		
 		// TODO:
 		// const address = "0x" + nextCmd.substring(4, 6) + nextCmd.substring(2, 4);
 		// const value = nextCmd.substring(6, nextCmd.length-2);
@@ -994,21 +1046,19 @@ class CommandMessageQ {
 		//  return;
 		// }
 
-		logger.debug("Sending " + nextCmd.substring(0, nextCmd.length-1));
-		this.getResponse(nextCmd).then(this.responseHandler.bind(this))
+		logger.debug("Sending " + trim(nextCmd.getMessage()));
+		this.getResponse(nextCmd.getMessage()).then(this.responseHandler.bind(this))
                     .catch(function(reject) {
 			logger.warn("Reject: " + reject.message);
                     });
             }
             else
             {
-		let multipleStr = "";
+		let multipleStr = "another time ";
 		if (this.sendMessageDeferTimer === null) // first deferal
 		{
 		    logger.debug("Port not yet operational");
 		    multipleStr = "first time ";
-		} else {
-		    multipleStr = "another time ";
 		}
                 logger.debug("==> message deferred " + multipleStr + "by "
 			     + this.deferalTimeInMs + " milliseconds");
@@ -1027,64 +1077,73 @@ class CommandMessageQ {
             logger.debug("MessageQ empty");
     }
 
-    // \param  message consisting of a command and parameters
-    // \return the command part of the message
-    command(message) {
-	return message.substring(0, 6);
+    // \pre    the priorities in cmdMessageQ must be descending
+    // \return the next index of the element that has at least priority
+    //         the returned index is guaranteed in [0; this.cmdMessageQ.length]
+    indexForPriority(priority) {
+	let i = this.cmdMessageQ.length;
+	while (--i > 0 && this.cmdMessageQ[i].getPriority() < priority);
+	return i+1;
     }
     
-    // \param message is a command starting with : and ending with the checksum
-    // \param priority is 0 or 1, 1 is prefered execution,
-    //        if no priority is given 0 is assumed
-    Q_push_back(message, priority) {
-	logger.trace('CommandMessageQ::Q_push_back');
-	const l = this.cmdMessageQ.length;
 
-	if (priority !== undefined && priority === 1)
+    // \detail scroll through all array elements with priority 1 from the start of the
+    //         array. Insert message after last message with priority 1
+    insertPriority(message, indexOfInsertion) {
+	let i = 0;
+	let prioOneMsg = [];
+	for (i = 0; i < indexOfInsertion; ++i)
 	{
-            if (l > 1) // insert message between 1st and 2nd array element
-            {
-		logger.debug("Prioritizing " + message);
-		// first is currently executed --> leave at position 0
-		let first = this.cmdMessageQ.shift();
-		// insert message at position 1
-		// FIXME: needs to scroll through all prio 1 message and put it as last prio 1!!!
-		this.cmdMessageQ.unshift(first, message);
-		// it is possible that this.cmdMessageQ and message are the same command
-		// (with same or different parameters). However we cannot compress
-		// because we do not know at which execution state this.cmdMessageQ[0] is.
-            }
-            else // l == 0 or 1
-            {
-		this.cmdMessageQ.push(message);
-            }
-	    logger.debug("Cmd Q: " + this.cmdMessageQ.length);
-            return;
+	    prioOneMsg.push(this.cmdMessageQ.shift());
 	}
+	// assert(this.cmdMessageQ[i] === 0 or i >= this.cmdMessageQ.length)
+	prioOneMsg.push(message);
+	this.cmdMessageQ = prioOneMsg.concat(this.cmdMessageQ);
+    }
+
+    // \details a message is generally appended to the end of the Q.
+    //          If the message contains the same command as the last
+    //          in the Q (possibly with different params) and
+    //          cmdCompression is on, then the last message in the Q
+    //          is replaced by the incoming message. This is not done
+    //          if the last message is the only and first message in 
+    //          the Q because the first message is already send and
+    //          executed.
+    // \param command of class Command
+    Q_push_back(cmd) {
+	logger.trace('CommandMessageQ::Q_push_back');
+	//const l = this.cmdMessageQ.length;
+	const l = this.indexForPriority(cmd.getPriority()); // in [0; this.cmdMessageQ.length]
+	
+	if (l < this.cmdMessageQ.length) logger.debug("Prioritizing " + cmd.toString());
+	logger.debug("Inserting at index " + l + " of " + this.cmdMessageQ.length);
 	// check: current command is same as previous but with possibly different
 	//        parameter ==> if cmdCompression, execute only current command and
 	//        skip previous
 	if (this.cmdCompression
 	    // l > 1: must not touch command at pos 0 because it is executed
-            && (l > 1) && (this.command(this.cmdMessageQ[l-1]) == this.command(message)))
+            && l > 1 && (this.cmdMessageQ[l-1].getId() == cmd.getId()))
 	{   // replace last command with possibly different params
-            this.cmdMessageQ[l-1] = message;
-            logger.debug("Command compression: Last cmd in Q replaced: " + this.cmdMessageQ.length);
+            this.cmdMessageQ[l-1] = cmd;
+            logger.debug("Command compression: previous command "
+			 + l-1 + " in Q replaced: " + this.cmdMessageQ.length);
 	}
 	else
 	{
             // never execute the very same command with same parameters
 	    // twice as it is like bouncing
-            if (l === 0 || this.cmdMessageQ[l-1] != message)
+            if (l === 0 || this.cmdMessageQ[l-1].getMessage() != cmd.getMessage())
             {
-		this.cmdMessageQ.push(message);
+		this.insertPriority(cmd, l);
 		logger.debug("Cmd Q: " + this.cmdMessageQ.length);
             }
             else
             {
-		logger.debug("Repeated message ignored: " + message);
+		logger.debug("Repeated message ignored: " + trim(cmd.getMessage()));
             }
 	}
+	//logger.debug("MessageQ is:");
+	//this.cmdMessageQ.map(c => logger.error(trim(c.getMessage())));
     }
 
 
@@ -1092,14 +1151,17 @@ class CommandMessageQ {
     //   - Puts the message into the Q
     //   - Starts the Q if not yet running
     //   - Sets a timeout timer after which the first Q element is removed
-    // \param message containing a command and parameters
+    // \param message of class Command
     // \param priority in [0; 1]; default 0; 0 = normal, 1 = prioritized (send next)
-    sendMsg(message, priority) {
-	message = message.toUpperCase();
-	logger.trace('CommandMessageQ::sendMsg: ' + message.substring(0, message.length-1) + "\\n");
+    // \note It was planned to have a timeout parameter in sendMsg. However
+    //       the BMV is so slow that almost any reasonable timeout will expire if
+    //       several commands are in the Q. Force command implemented instead.
+    sendMsg(message) {
+
+	logger.trace('CommandMessageQ::sendMsg: ' + message.toString() + "\\n");
 	const isQEmpty = (this.cmdMessageQ.length === 0); // must be set before Q_push_back
 
-        this.Q_push_back(message, priority);
+        this.Q_push_back(message);
 	if (isQEmpty)
 	{
             this.runMessageQ();
@@ -1109,6 +1171,8 @@ class CommandMessageQ {
     // FIXME: does not use the Q which is not a good idea? Sends straight to port
     //        use sendMsg!!
     sendSimpleCommand(cmd, expectedResponseId) {
+	// FIXME: temporary disabled
+	return;
 	logger.trace('CommandMessageQ::sendSimpleCommand');
 	let command = ':' + cmd;
 	command = append_checksum(command) + '\n';
@@ -1150,8 +1214,6 @@ class CommandMessageQ {
 	logger.debug('Max. command response time: ' + this.maxResponseTime + ' ms');
         this.port.close();
     }
-
-
 }
 
 
@@ -1163,11 +1225,9 @@ class VitronEnergyDevice {
 	logger.trace('VitronEnergyDevice::constructor');
         // set isRecording true to record the incoming data stream to record_file
         this.isRecording = false;
-	this.cmdMessageQ = [];
 	this.on = null;
         if(! VitronEnergyDevice.instance){
 	    this.cmdQ = new CommandMessageQ();
-            //this.open('/dev/serial/by-id/usb-VictronEnergy_BV_VE_Direct_cable_VE1SUT80-if00-port0');
             VitronEnergyDevice.instance = this;
         }
         return VitronEnergyDevice.instance;
@@ -1183,18 +1243,29 @@ class VitronEnergyDevice {
 	if (this.cmdQ) this.cmdQ.close();
     }
 
-    get(address, priority, timeoutInMs) {
+    // \param force keep trying until successful
+    get(address, priority, force) {
 	logger.trace('VitronEnergyDevice::get(address): ' + address);
-	const message = createMessage(getCommand, address, '');
-	this.cmdQ.sendMsg(message, priority);
+	let maxRetries = 3;
+	if (force)
+	    // maxRetries = MAX_SAFE_INTEGER not defined
+	    maxRetries = 999999;
+	const command = new Command(getCommand, address, '', priority, maxRetries);
+	logger.debug("Command: " + command);
+	this.cmdQ.sendMsg(command);
     }
 
     // \param value must be a string of 4 or 8  characters in hexadecimal
     //        with byte pairs swapped, i.e. 1B83 => 831B
-    set(address, value, priority, timeoutInMs) {
+    // \param force in {true, false} keep trying until successful
+    set(address, value, priority, force) {
 	logger.trace('VitronEnergyDevice::set(address): ' + address);
-	const message = createMessage(setCommand, address, value);
-	this.cmdQ.sendMsg(message, priority);
+	let maxRetries = 3;
+	if (force)
+	    // maxRetries = MAX_SAFE_INTEGER not defined
+	    maxRetries = 999999;
+	const command = new Command(setCommand, address, value, priority, maxRetries);
+	this.cmdQ.sendMsg(command);
 	// TODO: validate value is the returned value?!
     }
 
@@ -1565,18 +1636,18 @@ class VitronEnergyDevice {
     }
 
     // \param mode 0 = default, 1 = charge, 2 = remote
-    set_relay_mode(mode) {
+    set_relay_mode(mode, priority, force) {
     	logger.trace("VitronEnergyDevice::set relay mode");
 
 	if (Math.floor(parseInt(addressCache["0x034F"].value)) === mode) return;
 	
 	// FIXME: set priority 1 (bug: currently not working)
 	if (mode === 0)
-	    this.set("0x034F", "00", 0, 0);
+	    this.set("0x034F", "00", priority, force);
 	else if (mode === 1)
-	    this.set("0x034F", "01", 0, 0);
+	    this.set("0x034F", "01", priority, force);
 	else if (mode === 2)
-	    this.set("0x034F", "02", 0, 0);
+	    this.set("0x034F", "02", priority, force);
     }
 
     setRelay(mode) {
@@ -1585,7 +1656,11 @@ class VitronEnergyDevice {
 	//        in cmdMessageQ and do not allow them being pushed.
         logger.trace("VitronEnergyDevice::set relay");
 	// FIXME: for being generic, this should be done outside
-        this.set_relay_mode(2);
+	const priority = 1;
+	const force = true;
+	// if setRelay is on force or priority, then set_relay_mode must be too.
+	// Otherwise setRelay may "overtake" set_relay_mode
+        this.set_relay_mode(2, priority, force);
 
 	let currentMode = 0;
 	if (addressCache["0x034E"].value === "ON") currentMode = 1;
@@ -1593,9 +1668,9 @@ class VitronEnergyDevice {
 
 	// FIXME: set priority 1 (bug: currently not working)
         if (mode === 0)
-            this.set("0x034E", "00", 0, 0);
+            this.set("0x034E", "00", priority, force);
         else
-            this.set("0x034E", "01", 0, 0);
+            this.set("0x034E", "01", priority, force);
     }
 
     set_alarm() {
