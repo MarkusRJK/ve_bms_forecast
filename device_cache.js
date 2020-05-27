@@ -210,21 +210,17 @@ var getErrorText = function(errorCode) {
 // units == "" for unit-less values
 // units == "s" ==> output in format weeks days h m s;
 //                  \pre nativeToUnitFactor must convert to seconds
-function register(key, nativeToUnitFactor, units, shortDescr, options) {
-    if (map[key] === undefined)
-    {
-	map[key] = new Object();
-	logger.debug("Creating new object for " + key);
-    };
-    map[key].value = null;
-    map[key].newValue = null;
+function register(nativeToUnitFactor, units, shortDescr, options) {
+    let obj = new Object();
+    obj.value = null;
+    obj.newValue = null;
     // choose 0 for strings
-    map[key].nativeToUnitFactor = nativeToUnitFactor;
+    obj.nativeToUnitFactor = nativeToUnitFactor;
     // e.g. A, V, km/h, % ...
-    map[key].units = units;
-    map[key].shortDescr = shortDescr;
+    obj.units = units;
+    obj.shortDescr = shortDescr;
     // format and scale from raw value to unit-value with given precision
-    map[key].formatted = function() {
+    obj.formatted = function() {
 	if (this.value === null || this.nativeToUnitFactor === 0) return this.value;
 	var scaledToIntPrecision = Number(this.value * this.nativeToUnitFactor / this.precision);
 	var div = 1 / this.precision;
@@ -232,7 +228,7 @@ function register(key, nativeToUnitFactor, units, shortDescr, options) {
 	//return scaledToIntPrecision.toFixed(2);
 	return Math.floor(scaledToIntPrecision) / div;
     }
-    map[key].formattedWithUnit = function() {
+    obj.formattedWithUnit = function() {
 	if (this.units === "s")
 	{
 	    // nativeToSIFactor must convert the value to SI i.e. seconds
@@ -245,46 +241,46 @@ function register(key, nativeToUnitFactor, units, shortDescr, options) {
 	else return this.formatted() + " " + this.units;
     }
     // initialize defaults for optional parameters:
-    map[key].description = ""; // default
-    map[key].precision = 0.01; // default precision -2 digits after dot
-    // TODO: map[key].on = []; and implement addListener, deleteListener
-    map[key].on = null;
+    obj.description = ""; // default
+    obj.precision = 0.01; // default precision -2 digits after dot
+    // TODO: obj.on = []; and implement addListener, deleteListener
+    obj.on = null;
     // if values are read from register instead of the frequent value
     // updates, the values are in hexadecimal string format and may
     // have a different factor that needs to be applied to convert
     // to the same value as the frequent update. This is done by
     // fromHexStr and the inverse function by toHexStr
-    map[key].fromHexStr = conv.hexToUint; // default
-    map[key].toHexStr = null;
+    obj.fromHexStr = conv.hexToUint; // default
+    obj.toHexStr = null;
     // if options exist, overwrite specific option:
-    if (options === undefined) return map[key];
+    if (options === undefined) return obj;
     if (options['description'])
     {
-	map[key].description = options['description'];
+	obj.description = options['description'];
     }
     // example: pure int ==> precision := 0; 
     // 2 digits at the right of the decimal point ==> precision := -2
     if (options['precision'])
     {
-	map[key].precision = Math.pow(10, options['precision']);
+	obj.precision = Math.pow(10, options['precision']);
     }
     if (options['formatter'])
     {
-	map[key].formatted = options['formatter'];
+	obj.formatted = options['formatter'];
     }
     if (options['on'])
     {
-	map[key].on = options['on'];
+	obj.on = options['on'];
     }
     if (options['fromHexStr'])
     {
-	map[key].fromHexStr = options['fromHexStr'];
+	obj.fromHexStr = options['fromHexStr'];
     }
     if (options['toHexStr'])
     {
-	map[key].toHexStr = options['toHexStr'];
+	obj.toHexStr = options['toHexStr'];
     }
-    return map[key];
+    return obj;
 };
 
 
@@ -304,292 +300,345 @@ function map_components() {
 
     // Monitored values:
     // BMV600, BMV700, Phoenix Inverter
-    bmvdata.alarmReason         = register('AR',    1,      "",    "Alarm reason",
+    bmvdata.alarmReason         = register(1,      "",    "Alarm reason",
 					   {'precision': 0, 'formatter' : function() 
     {
 	return getAlarmText(this.value);
     }});
-
+    map['AR']                   = bmvdata.alarmReason;
+    
     // BMV600, BMV700, MPPT - Type Sn16; Unit: 0.1A!!!
     // On BMV-712 >v4.01 and BMV-70x >v3.09: Type: Sn32; Unit: 0.001A
-    bmvdata.batteryCurrent      = register('I',     0.001,  "A",   "Battery Current",
+    bmvdata.batteryCurrent      = register(0.001,  "A",   "Battery Current",
 					   {'fromHexStr': (hex) => { return 100 * conv.hexToSint(hex); } });
+    map['I']                    = bmvdata.batteryCurrent;
     addressCache['0xED8F']      = bmvdata.batteryCurrent;
     // only on BMV-712 > v4.01 and BMV-70x > v3.09: is might be address '0xED8C'
 
     // MPPT
-    bmvdata.loadCurrent         = register('IL',    0.001,  "A",   "Load Current");
+    bmvdata.loadCurrent         = register(0.001,  "A",   "Load Current");
+    map['IL']                   = bmvdata.loadCurrent;
     // MPPT - returns string 'ON' or 'OFF'
-    bmvdata.load                = register('LOAD',  0,      "",    "Load Output State",
+    bmvdata.load                = register(0,      "",    "Load Output State",
 					   { 'fromHexStr': conv.hexToOnOff });
-
+    map['LOAD']                 = bmvdata.load;
 
     // BMV600, BMV700, MPPT, Phoenix Inverter - Display: MAIN; Type: Sn16; Unit: 0.01V!!!
-    bmvdata.upperVoltage        = register('V',     0.001,  "V",   "Main Voltage",
+    bmvdata.upperVoltage        = register(0.001,  "V",   "Main Voltage",
 					   { 'description': "Main (Battery) Voltage",
 					     'fromHexStr': (hex) => { return 10 * conv.hexToSint(hex); }});
+    map['V']                    = bmvdata.upperVoltage;
     addressCache['0xED8D']      = bmvdata.upperVoltage;
 
     // BMV700 - Display: MID; Type: Un16; Units: 0.01V!!! (only BMV-702 and BMV-712)
-    bmvdata.midVoltage          = register('VM',    0.001,  "V",   "Mid Voltage",
+    bmvdata.midVoltage          = register(0.001,  "V",   "Mid Voltage",
 					   { 'description': "Mid-point Voltage of the Battery Bank",
 					     'fromHexStr': (hex) => { return 10 * conv.hexToSint(hex); }});
     // only on BMV-702 and BMV-712
+    map['VM']                   = bmvdata.midVoltage;
     addressCache['0x0382']      = bmvdata.midVoltage;
 
     // BMV700 - Type: Un16; Unit: 0.01 K!!!
-    bmvdata.batteryTemp         = register('T',     1.0,    "°C",  "Battery Temperature");
+    bmvdata.batteryTemp         = register(1.0,    "°C",  "Battery Temperature");
     // only on BMV-702 and BMV-712
+    map['T']                    = bmvdata.batteryTemp;
     addressCache['0xEDEC']      = bmvdata.batteryTemp;
 
     // BMV700 - Type: Sn16; Unit: W
-    bmvdata.instantPower        = register('P',     1.0,    "W",   "Instantaneous Power",
+    bmvdata.instantPower        = register(1.0,    "W",   "Instantaneous Power",
 					   {'fromHexStr': conv.hexToSint });
+    map['P']                    = bmvdata.instantPower;
     addressCache['0xED8E']      = bmvdata.instantPower;
 
     // BMV600, BMV700 - Type: Un16; Unit: 0.01%!!! for 0x0FFF
     //                  Type: Un8 for 0xEEB6 ??? (Synchronisation State)
-    bmvdata.stateOfCharge       = register('SOC',   0.1,    "%",   "State of charge",
+    bmvdata.stateOfCharge       = register(0.1,    "%",   "State of charge",
 					   { 'precision': -1,
 					     'fromHexStr' : (hex) => { return 0.1 * conv.hexToUint(hex); } });
+    map['SOC']                 = bmvdata.stateOfCharge; // tested 
     addressCache['0x0FFF']     = bmvdata.stateOfCharge; // tested 
     //addressCache['0xEEB6']     = bmvdata.stateOfCharge; // FIXME: what is this really?
 
     // BMV600, BMV700 - Display: AUX; Type: Sn16; Unit: 0.01V!!! (not available on BMV-702 and BMV-712)
-    bmvdata.auxVolt             = register('VS',    0.001,  "V",   "Aux. Voltage",
+    bmvdata.auxVolt             = register(0.001,  "V",   "Aux. Voltage",
 					   { 'precision': -1, 'description': "Auxiliary (starter) Voltage",
 					     'fromHexStr': (hex) => { return 10 * conv.hexToSint(hex); }});
     // only on BMV-702 and BMV-712
+    map['VS']                   = bmvdata.auxVolt;
     addressCache['0xED7D']      = bmvdata.auxVolt;
 
     // BMV600, BMV700 - Type: Sn32; Unit: 0.1 Ah!!!
-    bmvdata.consumedAh          = register('CE',    0.001,  "Ah",  "Consumed",
+    bmvdata.consumedAh          = register(0.001,  "Ah",  "Consumed",
 					   { 'description': "Consumed Ampere Hours",
 					     'fromHexStr': (hex) => { return 100 * conv.hexToSint(hex); } });
+    map['CE']                   = bmvdata.consumedAh;
     addressCache['0xEEFF']      = bmvdata.consumedAh;
 
     // BMV700 - Display: MID; Type: Sn16; Units: 0.1 %
-    bmvdata.midDeviation        = register('DM',    1.0,    "%",   "Mid Deviation",
+    bmvdata.midDeviation        = register(1.0,    "%",   "Mid Deviation",
 					   { 'description': "Mid-point Deviation of the Battery Bank",
 					     'fromHexStr' : conv.hexToSint });
     // only on BMV-702 and BMV-712
+    map['DM']                   = bmvdata.midDeviation;
     addressCache['0x0383']      = bmvdata.midDeviation;
 
     // MPPT
-    bmvdata.panelVoltage        = register('VPV',   0.001,  "V",   "Panel Voltage");
+    bmvdata.panelVoltage        = register(0.001,  "V",   "Panel Voltage");
+    map['VPV']                  = bmvdata.panelVoltage;
     // MPPT
-    bmvdata.panelPower          = register('PPV',   1.0,    "W",   "Panel Power");
+    bmvdata.panelPower          = register(1.0,    "W",   "Panel Power");
+    map['PPV']                  = bmvdata.panelPower;
     // MPPT, Phoenix Inverter
-    bmvdata.stateOfOperation    = register('CS',    0,      "",    "State of Operation", {'formatter' : function() 
+    bmvdata.stateOfOperation    = register(0,      "",    "State of Operation", {'formatter' : function() 
     {
 	return getStateOfOperationText(this.value);
     }});
+    map['CS']                   = bmvdata.stateOfOperation;
     // BMV700, MPPT, Phoenix Inverter
-    bmvdata.productId           = register('PID',   0,      "",    "Product ID", {'formatter' : function() 
+    bmvdata.productId           = register(0,      "",    "Product ID", {'formatter' : function() 
     {
 	return getProductLongname(this.value);
     }});
+    map['PID']                  = bmvdata.productId;
     // BMV600, BMV700, MPPT, Phoenix Inverter
-    bmvdata.version             = register('FW',    0.01,  "",     "Firmware version");
+    bmvdata.version             = register(0.01,  "",     "Firmware version");
+    map['FW']                   = bmvdata.version;
 
     // History values
     // BMV600, BMV700
-    bmvdata.deepestDischarge    = register('H1',    0.001, "Ah",   "Deepest Discharge",
+    bmvdata.deepestDischarge    = register(0.001, "Ah",   "Deepest Discharge",
 					   { 'precision': -2, 'description': "Depth of deepest discharge",
 					     'fromHexStr' : (hex) => { return 100 * conv.hexToSint(hex); } });
+    map['H1']                   = bmvdata.deepestDischarge;
     addressCache['0x0300']      = bmvdata.deepestDischarge;
 
     // BMV600, BMV700
-    bmvdata.maxAHsinceLastSync  = register('H2',    0.001, "Ah",   "Last Discharge",
+    bmvdata.maxAHsinceLastSync  = register(0.001, "Ah",   "Last Discharge",
 					   { 'precision': 0, 'description': "Depth of last discharge", // Max Discharge since sync
 					     'fromHexStr': (hex) => { return 100 * conv.hexToSint(hex); } });
+    map['H2']                   = bmvdata.maxAHsinceLastSync;
     addressCache['0x0301']      = bmvdata.maxAHsinceLastSync;
 
     // BMV600, BMV700
-    bmvdata.avgDischarge        = register('H3',    0.001, "Ah",   "Avg. Discharge",
+    bmvdata.avgDischarge        = register(0.001, "Ah",   "Avg. Discharge",
 					   { 'description': "Depth of average discharge",
 					     'fromHexStr' : (hex) => { return 100 * conv.hexToSint(hex); }});
+    map['H3']                   = bmvdata.avgDischarge;
     addressCache['0x0302']      = bmvdata.avgDischarge;
 
     // BMV600, BMV700
-    bmvdata.chargeCycles        = register('H4',    1.0,   "",     "Charge Cycles",
+    bmvdata.chargeCycles        = register(1.0,   "",     "Charge Cycles",
 					   { 'description': "Number of charge cycles" });
+    map['H4']                   = bmvdata.chargeCycles;
     addressCache['0x0303']      = bmvdata.chargeCycles;
 
     // BMV600, BMV700
-    bmvdata.fullDischarges      = register('H5',    1.0,   "",     "Full Discharges",
+    bmvdata.fullDischarges      = register(1.0,   "",     "Full Discharges",
 					   { 'description': "Number of full discharges" });
+    map['H5']                   = bmvdata.fullDischarges;
     addressCache['0x0304']      = bmvdata.fullDischarges;
 
     // BMV600, BMV700
-    bmvdata.drawnAh             = register('H6',    0.001, "Ah",   "Cum. Ah drawn",
+    bmvdata.drawnAh             = register(0.001, "Ah",   "Cum. Ah drawn",
 					   { 'fromHexStr': (hex) => { return 100 * conv.hexToSint(hex); }});
+    map['H6']                   = bmvdata.drawnAh;
     addressCache['0x0305']      = bmvdata.drawnAh;
 
     // BMV600, BMV700
-    bmvdata.minVoltage          = register('H7',    0.001, "V",    "Min. Voltage",
+    bmvdata.minVoltage          = register(0.001, "V",    "Min. Voltage",
 					   { 'description': "Minimum Main (Battery) Voltage",
 					     'fromHexStr': (hex) => { return 10 * conv.hexToSint(hex); }});
+    map['H7']                   = bmvdata.minVoltage;
     addressCache['0x0306']      = bmvdata.minVoltage;
 
     // BMV600, BMV700
-    bmvdata.maxVoltage          = register('H8',    0.001, "V",    "Max. Voltage",
+    bmvdata.maxVoltage          = register(0.001, "V",    "Max. Voltage",
 					   { 'description': "Maximum Main (Battery) Voltage",
 					     'fromHexStr': (hex) => { return 10 * conv.hexToSint(hex); }});
+    map['H8']                   = bmvdata.maxVoltage;
     addressCache['0x0307']      = bmvdata.maxVoltage;
 
     // BMV600, BMV700
-    bmvdata.timeSinceFullCharge = register('H9',    1.0,   "s",    "Time since Full Charge",
+    bmvdata.timeSinceFullCharge = register(1.0,   "s",    "Time since Full Charge",
 					   { 'description': "Number of seconds since full charge" });
+    map['H9']                   = bmvdata.timeSinceFullCharge;
     addressCache['0x0308']      = bmvdata.timeSinceFullCharge;
 
     // BMV600, BMV700
-    bmvdata.noAutoSyncs         = register('H10',   1,     "",     "Auto. Syncs",
+    bmvdata.noAutoSyncs         = register(1,     "",     "Auto. Syncs",
 					   { 'description': "Number of automatic synchronisations" });
+    map['H10']                 =  bmvdata.noAutoSyncs;
     addressCache['0x0309']     =  bmvdata.noAutoSyncs;
 
     // BMV600, BMV700
-    bmvdata.lowVoltageAlarms    = register('H11',   1,     "",     "Low Volt. Alarms",
+    bmvdata.lowVoltageAlarms    = register(1,     "",     "Low Volt. Alarms",
 					   { 'description': "Number of Low Main Voltage Alarms" });
+    map['H11']                  = bmvdata.lowVoltageAlarms;
     addressCache['0x030A']      = bmvdata.lowVoltageAlarms;
 
     // BMV600, BMV700
-    bmvdata.highVoltageAlarms   = register('H12',   1,     "",     "High Volt. Alarms",
+    bmvdata.highVoltageAlarms   = register(1,     "",     "High Volt. Alarms",
 					   { 'description': "Number of High Main Voltage Alarms" });
+    map['H12']                  = bmvdata.highVoltageAlarms;
     addressCache['0x030B']      = bmvdata.highVoltageAlarms;
 
     // BMV600
-    bmvdata.lowAuxVoltageAlarms = register('H13',   1,     "",     "Low Aux. Volt. Alarms",
+    bmvdata.lowAuxVoltageAlarms = register(1,     "",     "Low Aux. Volt. Alarms",
 					   { 'description': "Number of Low Auxiliary Voltage Alarms" });
+    map['H13']                  = bmvdata.lowAuxVoltageAlarms;
 
     // BMV600
-    bmvdata.highAuxVoltageAlarms= register('H14',   1,     "",     "High Aux. Volt. Alarms",
+    bmvdata.highAuxVoltageAlarms= register(1,     "",     "High Aux. Volt. Alarms",
 					   { 'description': "Number of High Aux. Voltage Alarms" });
+    map['H14']                  = bmvdata.highAuxVoltageAlarms;
+    
     // BMV600, BMV700
-    bmvdata.minAuxVoltage       = register('H15',   0.001, "V",    "Min. Aux. Volt.",
+    bmvdata.minAuxVoltage       = register(0.001, "V",    "Min. Aux. Volt.",
 					   { 'description': "Minimal Auxiliary (Battery) Voltage",
 					     'fromHexStr': (hex) => { return 10 * conv.hexToSint(hex); }});
+    map['H15']                  = bmvdata.minAuxVoltage;
     addressCache['0x030E']      = bmvdata.minAuxVoltage;
 
     // BMV600, BMV700
-    bmvdata.maxAuxVoltage       = register('H16',   0.001, "V",    "Max. Aux. Volt.",
+    bmvdata.maxAuxVoltage       = register(0.001, "V",    "Max. Aux. Volt.",
 					   { 'description': "Maximal Auxiliary (Battery) Voltage",
 					     'fromHexStr': (hex) => { return 10 * conv.hexToSint(hex); }});
+    map['H16']                  = bmvdata.minAuxVoltage;
     addressCache['0x030F']      = bmvdata.maxAuxVoltage;
 
     // BMV700
-    bmvdata.dischargeEnergy     = register('H17',   0.01,  "kWh",  "Drawn Energy",
+    bmvdata.dischargeEnergy     = register(0.01,  "kWh",  "Drawn Energy",
 					   { 'description': "Amount of Discharged Energy" });
+    map['H17']                  = bmvdata.dischargeEnergy;
     addressCache['0x0310']      = bmvdata.dischargeEnergy;
 
     // BMV700
-    bmvdata.absorbedEnergy      = register('H18',   0.01,  "kWh",  "Absorbed Energy",
+    bmvdata.absorbedEnergy      = register(0.01,  "kWh",  "Absorbed Energy",
 					   { 'description': "Amount of Charged Energy" });
+    map['H18']                  = bmvdata.absorbedEnergy;
     addressCache['0x0311']      = bmvdata.absorbedEnergy;
 
     // MPPT
-    bmvdata.yieldTotal          = register('H19',   0.01,  "kWh",  "Yield Total",
+    bmvdata.yieldTotal          = register(0.01,  "kWh",  "Yield Total",
 					   { 'description': "User resettable counter" });
+    map['H19']                  = bmvdata.yieldTotal;
     // MPPT
-    bmvdata.yieldToday          = register('H20',   0.01,  "kWh",  "Yield Today");
+    bmvdata.yieldToday          = register(0.01,  "kWh",  "Yield Today");
+    map['H20']                  = bmvdata.yieldToday;
     // MPPT
-    bmvdata.maxPowerToday       = register('H21',   1.0,   "W",    "Max. Power Today");
+    bmvdata.maxPowerToday       = register(1.0,   "W",    "Max. Power Today");
+    map['H21']                  = bmvdata.maxPowerToday;
+    
     // MPPT
-    bmvdata.yieldYesterday      = register('H22',   0.01,  "kWh",  "Yield Yesterday");
+    bmvdata.yieldYesterday      = register(0.01,  "kWh",  "Yield Yesterday");
+    map['H22']                  = bmvdata.yieldYesterday;
+    
     // MPPT
-    bmvdata.maxPowerYesterday   = register('H23',   1.0,   "W",    "Max. Power Yesterday");
+    bmvdata.maxPowerYesterday   = register(1.0,   "W",    "Max. Power Yesterday");
+    map['H23']                  = bmvdata.maxPowerYesterday;
+    
     // MPPT
-    bmvdata.errorCode           = register('ERR',   1,     "",     "MPPT Error Code", {'formatter' : function() 
+    bmvdata.errorCode           = register(1,     "",     "MPPT Error Code", {'formatter' : function() 
     {
 	return getErrorText(this.value);
     }});
+    map['ERR']                  = bmvdata.errorCode;
+
     // Phoenix Inverter
-    bmvdata.warnReason          = register('WARN',  0,     "",     "Warning Reason");
+    bmvdata.warnReason          = register(0,     "",     "Warning Reason");
+    map['WARN']                 = bmvdata.warnReason;
     // MPPT, Phoenix Inverter
-    bmvdata.serialNumber        = register('SER#',  0,     "",     "Serial Number");
-    // BlueSolar MPPT - returns 0..364
-    bmvdata.daySequenceNumber   = register('HSDS',  1,     "",     "Day Sequence Number");
+    bmvdata.serialNumber        = register(0,     "",     "Serial Number");
+    map['SER#']                 = bmvdata.serialNumber;
+    // BlueSolar MPPT - returns 0WARNWARNWARN..364
+    bmvdata.daySequenceNumber   = register(1,     "",     "Day Sequence Number");
+    map['HSDS']                 = bmvdata.daySequenceNumber;
     // Phoenix Inverter
-    bmvdata.deviceMode          = register('MODE',  1,     "",     "Device Mode", {'formatter' : function() 
+    bmvdata.deviceMode          = register(1,     "",     "Device Mode", {'formatter' : function() 
     {
 	return getDeviceModeText(this.value);
     }});
+    map['MODE']                 = bmvdata.deviceMode;
 
     // Phoenix Inverter
-    bmvdata.ACoutVoltage        = register('AC_OUT_V',0.01,"V",    "AC Output Voltage");
+    bmvdata.ACoutVoltage        = register(0.01,"V",    "AC Output Voltage");
+    map['AC_OUT_V']             = bmvdata.ACoutVoltage;
     // Phoenix Inverter
-    bmvdata.ACoutCurrent        = register('AC_OUT_I',0.1, "A",    "AC Output Current");
+    bmvdata.ACoutCurrent        = register(0.1, "A",    "AC Output Current");
+    map['AC_OUT_I']             = bmvdata.ACoutVoltage;
 
     // BMV600, BMV700 - Type: Un16; Units: minutes
-    bmvdata.timeToGo            = register('TTG',   60.0,  "s",    "Time to go",
+    bmvdata.timeToGo            = register(60.0,  "s",    "Time to go",
 					   {'description': "Time until discharged" });
+    map['TTG']                  = bmvdata.timeToGo;
     addressCache['0x0FFE']      = bmvdata.timeToGo;
 
     // BMV600, BMV700 - returns string 'ON' or 'OFF'
-    bmvdata.alarmState          = register('Alarm', 0,   "",       "Alarm state",
+    bmvdata.alarmState          = register(0,   "",       "Alarm state",
 					   {'description': "Alarm condition active",
 					    'fromHexStr': conv.hexToOnOff
 					   });
+    map['Alarm']                = bmvdata.alarmState;
 
     addressCache['0xEEFC']      = bmvdata.alarmReason;
 
     // BMV600, BMV700, SmartSolar MPPT - returns string 'ON' or 'OFF'
-    bmvdata.relayState          = register('Relay', 0,   "",       "Relay state",
+    bmvdata.relayState          = register(0,   "",       "Relay state",
 					   { 'fromHexStr': conv.hexToOnOff
                                            });
-
+    map['Relay']                = bmvdata.relayState;
     // FIXME: how does this value behave with the inversion of the relay?
     addressCache['0x034E']      = bmvdata.relayState;
 
-    bmvdata.relayMode           = register('RelayMode', 1,   "",       "Relay mode");
+    bmvdata.relayMode           = register(1,   "",       "Relay mode");
+    map['RelayMode']            = bmvdata.relayMode;
     addressCache['0x034F']      = bmvdata.relayMode;
 
     // BMV600, BMV700
-    bmvdata.modelDescription    = register('BMV',   0,   "",       "Model Description");
+    bmvdata.modelDescription    = register(0,   "",       "Model Description");
+    map['BMV']                  = bmvdata.modelDescription;
 
     // FIXME: the following keys 'Cap', 'CV', 'TC' etc do not exist in the
     //        frequent updates...
-    // TODO:  change register function without creating a key then
-    //        do the map-ping outside register...
     // Battery settings: all of Type Un16 except UserCurrentZero
-    bmvdata.capacity            = register('Cap',   1,   "Ah",     "Battery capacity");
+    bmvdata.capacity            = register(1,   "Ah",     "Battery capacity");
     addressCache['0x1000']      = bmvdata.capacity;
 
-    bmvdata.chargedVoltage      = register('CV',  0.1,   "V",      "Charged voltage");
+    bmvdata.chargedVoltage      = register(0.1,   "V",      "Charged voltage");
     addressCache['0x1001']      = bmvdata.chargedVoltage;
 
-    bmvdata.tailCurrent         = register('TC',  0.1,   "%",      "Tail current");
+    bmvdata.tailCurrent         = register(0.1,   "%",      "Tail current");
     addressCache['0x1002']      = bmvdata.tailCurrent;
 
-    bmvdata.chargedDetectTime   = register('CDT',   1,   "min",    "Charged detection time");
+    bmvdata.chargedDetectTime   = register(1,   "min",    "Charged detection time");
     addressCache['0x1003']      = bmvdata.chargedDetectTime;
 
-    bmvdata.chargeEfficiency    = register('CEFF',  1,   "%",      "Charge efficiency");
+    bmvdata.chargeEfficiency    = register(1,   "%",      "Charge efficiency");
     addressCache['0x1004']      = bmvdata.chargeEfficiency;
 
-    bmvdata.peukertCoefficient  = register('PC', 0.01,   "",      "Peukert coefficiency");
+    bmvdata.peukertCoefficient  = register(0.01,   "",      "Peukert coefficiency");
     addressCache['0x1005']      = bmvdata.peukertCoefficient;
 
-    bmvdata.currentThreshold    = register('CT', 0.01,    "A",     "Current threshold");
+    bmvdata.currentThreshold    = register(0.01,    "A",     "Current threshold");
     addressCache['0x1006']      = bmvdata.currentThreshold;
 
-    bmvdata.timeToGoDelta       = register('TTGD',  1,    "min",   "Time to go Delta T");
+    bmvdata.timeToGoDelta       = register(1,    "min",   "Time to go Delta T");
     addressCache['0x1007']      = bmvdata.timeToGoDelta;
 
-    bmvdata.relayLowSOC         = register('RSOC', 0.1,    "%",     "Relay low SOC");
+    bmvdata.relayLowSOC         = register(0.1,    "%",     "Relay low SOC");
     addressCache['0x1008']      = bmvdata.relayLowSOC;
 
-    bmvdata.relayLowSOCClear    = register('RSOC_Clear', 0.1,"%",    "Relay low SOC clear");
+    bmvdata.relayLowSOCClear    = register(0.1,"%",    "Relay low SOC clear");
 
     // UCZ is of Type: Sn16; Read-Only
     addressCache['0x1009']      = bmvdata.relayLowSOCClear;
 
-    bmvdata.userCurrentZero     = register('UCZ',   1,    "",      "User current zero",
+    bmvdata.userCurrentZero     = register(1,    "",      "User current zero",
 					   { 'fromHexStr': conv.hexToSint });
     addressCache['0x1034']      = bmvdata.userCurrentZero;
 
     // Additional declarations:
-    bmvdata.topVoltage          = register('Vtop',  0.001,  "V", "Top Voltage", {'formatter' : function() 
+    bmvdata.topVoltage          = register(0.001,  "V", "Top Voltage", {'formatter' : function() 
     {
       this.value = bmvdata.upperVoltage.value - bmvdata.midVoltage.value;
       if (this.nativeToUnitFactor === 0) return this.value;
@@ -597,15 +646,14 @@ function map_components() {
       var div = 1 / this.precision;
       return Math.floor(scaledToIntPrecision) / div;
     }
-    });
-
-    // bmvdata.topSOC          = register('SOCtop',  1,  "%", "Top SOC", {'formatter' : function() 
+										});
+    // bmvdata.topSOC          = register(1,  "%", "Top SOC", {'formatter' : function() 
     // {
     // 	var topSOC    = estimate_SOC(bmvdata.topVoltage.formatted());
     // 	topSOC = Math.round(topSOC * 100) / 100;
     // 	return topSOC;
     // }});
-    // bmvdata.bottomSOC      = register('SOCbot',  1,  "%", "Bottom SOC", {'formatter' : function() 
+    // bmvdata.bottomSOC      = register(1,  "%", "Bottom SOC", {'formatter' : function() 
     // {
     // 	var bottomSOC = estimate_SOC(bmvdata.midVoltage.formatted());
     // 	bottomSOC = Math.round(bottomSOC * 100) / 100;

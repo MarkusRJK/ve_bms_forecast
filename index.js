@@ -17,7 +17,6 @@
 // - further parse: replace callback function by final parse function to do updates
 // - register function has switch statement to create each object after each other (only those appearing in update packet)
 // - add a on function for CHECKSUM that sends collection of all changes
-// - remove map key from objects and do it like addressCache
 // - iterate over bmvdata rather than map as bmvdata shall have all entries
 // - response from BMV to set command: also compare returned value
 // - make on a list so many callbacks can be called: callbacks = []; callback.push(..); callback.find(x)
@@ -80,10 +79,10 @@ logger.debug("Service started at " + date.toLocaleString('en-GB', { timeZone: 'U
 // on the device. All registers are cached in objects of this application.
 // These objects also provide conversions, formatters, units, callbacks
 // on change, descriptions etc.
-// The BMV sends some of these register values in one package every
-// 1 second (1-second-updates). Among them are the history values
-// (H1, H2, ...) and the actual values like voltage, current,
-// power, state of charge.
+// The BMV sends some of these register values in two packages every
+// 1 second (1-second-updates). The history package contains 
+// (H1, H2, ...) and the second package the actual values like voltage, 
+// current, power, state of charge.
 //
 // For convenience there are 3 maps pointing to the same objects:
 //
@@ -775,8 +774,8 @@ class Command extends Message {
 	super('');
 	logger.trace('Command::constructor(' + cmd + ", " + address + ", " + value + ")");
 	address         = address.substring(2, address.length);
-	if (priority)   this.priority = priority;
-	else            this.priority = 0; // default priority
+	if (priority)   this.priority   = priority;
+	else            this.priority   = 0; // default priority
 	if (maxRetries) this.maxRetries = maxRetries;
 	else            this.maxRetries = 3; // default retries
 	this.cmdStr     = this.createMessage(cmd, address, value);
@@ -834,8 +833,6 @@ class CommandMessageQ {
 	this.deferalTimeInMs = 1000;
 	// measured max response time approx. 3984ms
 	this.cmdResponseTimeoutMS = 6000; // milliseconds
-	// FIXME: cmdMaxRetries needed in Q class (now in Command class)
-	this.cmdMaxRetries = 3;
 	// two subsequent messages with the same command (and possible different
 	// parameters) are "compressed" into one command with the parameters of
 	// the second message
@@ -930,6 +927,7 @@ class CommandMessageQ {
 		logger.error("MessageQ empty");
 	    else {
 		logger.error("MessageQ is:");
+		// FIXME: use every?!
 		this.cmdMessageQ.map(c => logger.error(trim(c.getMessage())));
 	    }
 	}
@@ -988,25 +986,24 @@ class CommandMessageQ {
     // FIXME: replace command to getResponseTo(command)
     // \param cmdFrame looks like: :caaaaffvv..ss\n
     getResponse(cmdFrame) {
-	logger.trace("CommandMessageQ::getResponse(" + cmdFrame.substring(0, cmdFrame.length-1) + ")");
+	logger.trace("CommandMessageQ::getResponse(" + cmdFrame.toString() + ")");
 	let that = this;
 	return new Promise(function(resolve, reject)
 			   {
-			       const response = new Message(cmdFrame.substring(1, cmdFrame.length));
+			       const response = new Message(cmdFrame.getMessage().substring(1, cmdFrame.getMessage().length));
 			       let responseId = response.getId();
 			       logger.debug("Adding " + responseId + " to reponseMap");
 
 			       //var tid = setTimeout(this.responseTimeoutHandler, this.cmdResponseTimeoutMS, cmdFrame);
 			       const tid = setTimeout(
-				   function(cmdFrame) // do these params need bind?
+				   function() // do these params need bind?
 				   {
 				       that.responseTimeoutHandler(response);
 				   }, that.cmdResponseTimeoutMS, response);
 
 			       logger.debug("Timeout set to " + that.cmdResponseTimeoutMS
 					    + "ms for " + responseId)
-			       // FIXME: take max retries from incoming cmdframe (to be delivered as class Command object
-			       let newRetries = that.cmdMaxRetries;
+			       let newRetries = cmdFrame.maxRetries;
 			       if (responseId in responseMap)
 				   newRetries = responseMap[responseId].doRetry-1;
 			       responseMap[responseId] = {
@@ -1015,8 +1012,8 @@ class CommandMessageQ {
 				   doRetry: newRetries,
 				   sentTime: new Date(),
 			       };
-			       that.port.write(cmdFrame);
-			       logger.debug(cmdFrame.substring(0, cmdFrame.length-1)
+			       that.port.write(cmdFrame.getMessage());
+			       logger.debug(cmdFrame.getMessage().substring(0, cmdFrame.getMessage().length-1)
 					    + " sent to device");
 			   });
     }
@@ -1047,7 +1044,7 @@ class CommandMessageQ {
 		// }
 
 		logger.debug("Sending " + trim(nextCmd.getMessage()));
-		this.getResponse(nextCmd.getMessage()).then(this.responseHandler.bind(this))
+		this.getResponse(nextCmd).then(this.responseHandler.bind(this))
                     .catch(function(reject) {
 			logger.warn("Reject: " + reject.message);
                     });
@@ -1082,6 +1079,7 @@ class CommandMessageQ {
     //         the returned index is guaranteed in [0; this.cmdMessageQ.length]
     indexForPriority(priority) {
 	let i = this.cmdMessageQ.length;
+	// FIXME: use findIndex or indexOf
 	while (--i > 0 && this.cmdMessageQ[i].getPriority() < priority);
 	return i+1;
     }
@@ -1126,7 +1124,7 @@ class CommandMessageQ {
 	{   // replace last command with possibly different params
             this.cmdMessageQ[l-1] = cmd;
             logger.debug("Command compression: previous command "
-			 + l-1 + " in Q replaced: " + this.cmdMessageQ.length);
+			 + (l-1) + " in Q replaced: " + this.cmdMessageQ.length);
 	}
 	else
 	{
@@ -1179,6 +1177,7 @@ class CommandMessageQ {
 	logger.debug("===================================");
 	logger.debug("send simple command: " + command);
 
+	// FIXME: command is not of class command not string, this won't work anymore
 	this.getResponse(command)
 	    .then((response) => {
 		// resolve contains the command without leading : and trailing \n
