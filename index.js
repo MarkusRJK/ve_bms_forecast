@@ -39,7 +39,6 @@ const Math = require('mathjs');
 var fs = require('fs');
 //var util = require('util');
 //var log_file = fs.createWriteStream(__dirname + '/debug.log', {flags: 'w'});
-var record_file = fs.createWriteStream(__dirname + '/serial-test-data.log', {flags: 'w'});
 var log_stdout = process.stdout;
 var serialport = require('serialport');
 var conv = require('./hexconv');
@@ -65,7 +64,6 @@ log4js.configure({
 // e.g. set relay on, off, on, off, on, off mostly does not make
 // sense so it is enough to send the last command "off"
 var cmdCompression = true;
-var isSerialOperational = false;
 
 const logger = log4js.getLogger();
 logger.level = 'debug';
@@ -211,50 +209,6 @@ class RegularUpdateChecksum {
 var packageArrivalTime = 0;
 
 
-function updateCacheObject(obj, doLog) {
-    let change = new Object();
-    // FIXME: first test obj.newValue != null makes sense???
-    if (obj.newValue != null && obj.value !== obj.newValue)
-    {
-        let oldValue = obj.value;
-        obj.value = obj.newValue; // accept new values
-        // send event to listeners with values
-        // on() means if update applied,
-        
-        if (obj.on !== null) // && Math.abs(obj.value - obj.newValue) >= obj.precision)
-        {
-	    // FIXME: sort out packageArrivalTime
-            obj.on(obj.newValue, oldValue, obj.precision, packageArrivalTime);
-        }
-	change.newValue  = obj.newValue;
-	change.oldValue  = oldValue;
-	change.precision = obj.precision;
-        if (doLog) logger.debug(obj.shortDescr
-                                + " = " + oldValue
-                                + " updated with " + obj.newValue);
-    }
-    obj.newValue = null;
-    return change;
-}
-
-function updateValuesAndValueListeners(doLog) {
-    logger.trace('updateValuesAndValueListeners');
-    let mapOfChanges = {};
-    for (const [key, obj] of Object.entries(map)) {
-	mapOfChanges[key] = updateCacheObject(obj, doLog);
-    }
-    // FIXME: enable once updateValuesAndValueListeners is member of class VitronEl....
-    //if (this.on !== null) this.on(mapOfChanges, packageArrivalTime);
-}
-
-function discardValues() {
-    logger.trace('discardValues');
-    // FIXME: should only discard values that are coming from regular updates
-    for (const [key, obj] of Object.entries(map)) {
-        obj.newValue = null; // dump new values
-    } 
-}
-
 // \brief Creates the endianess needed by the device
 // \detail The bytes of the incoming hex string's words are
 //         filled with leading 0 and swapped
@@ -279,100 +233,6 @@ function endianSwap(hexStr, lengthInBytes)
 }
 
 
-
-var checksum = new RegularUpdateChecksum();
-
-function parse_serial(line) {
-    logger.trace('parse_serial');
-    let res = line.split("\t");
-    if (!res[0] || res[0] === "")
-    {
-	if (res[1] && res[1].length > 1 && res[1].substring(1, res[1].length).split(':'))
-	{
-	    logger.warn("Content found after tab without key");
-	}
-	return; // empty string
-    }
-
-    const checksumKey = "Checksum";
-    if (res[0] === checksumKey)
-    {
-	// Calculating checksum of "Checksum\t" (word Checksum + tab)
-	//
-	//              C  h   e   c  k   s   u   m   \t
-	// ASCII value: 67+104+101+99+107+115+117+109+11 = 828
-	//
-	// Looking at the oldCS and the expectedCS after receiving "Checksum\t":
-	//
-	// (oldCS + 828 + expectedCS) % 256 === 0!
-	// ==> (oldCS % 256) + (828 % 256) + expectedCS === 0 (expectedCS < 256)
-	// ==> expectedCS = -(oldCS % 256) - 60
-	//                = 256 - (oldCS % 256) + 196  
-	let expectedCS = (256 - (checksum.get() % 256) + 196) % 256; // Checksum+\t
-	if (expectedCS < 0) { expectedCS = expectedCS + 256; }
-
-	// line may contain garbage after the checksum, therefore
-	// restrict the line to the checksumKey plus tab plus the checksum value
-	let cs = checksum.update(line.substring(0, checksumKey.length + 2));
-        cs = cs % 256;
-        if (cs === 0) // valid checksum for periodic frames
-        {
-            updateValuesAndValueListeners(false);
-        }
-        else // checksum invalid
-        {
-            discardValues();
-	    const expStr = " - expected: 0x" + expectedCS.toString(16)
-                  + ' (' + expectedCS + ')';
-	    const prefix = "data set checksum: ";
-	    if (res[1].length === 0)
-	    {
-		logger.error(prefix + "checksum missing" + expStr);
-	    }
-	    else // in case a response arrived, checksum is mostly invalid => no error
-	    {
-		const isStr = "0x" + res[1].charCodeAt(0).toString(16) + ' ('
-                      + res[1].charCodeAt(0)
-                      + ")";
-		logger.warn(prefix + isStr + expStr);
-	    }
-        }
-	packageArrivalTime = 0;
-        checksum.reset(); // checksum field read => reset checksum
-        // frame always finishes before another frame
-        // or before a command response arrives.
-        // Check for command response now:
-
-	// res[1] contain the checksum of the previous frequent update package,
-	// and at least the : and the command
-        if (res[1].length <= 3) return;
-        // checksum value is followed by optional garbage and
-        // optional command responses all in res[1].
-        // First char of res[1] contains checksum value so start from 1:
-        // None, one or several command responses can follow a frame.
-        // Command responses always start with : and end with \n.
-        var cmdSplit = res[1].substring(1, res[1].length).split(':');
-	// split "swallows" the colon : so each element cmdSplit
-	// has the format caaaammv...vss\n.
-        var cmdIndex;
-        for (cmdIndex = 1; cmdIndex < cmdSplit.length; ++cmdIndex) {
-	    logger.debug("Creating response for " + cmdSplit[cmdIndex]);
-	    new Response(cmdSplit[cmdIndex]);
-        }
-    }
-    else
-    {
-	// a line consist of:
-	// field name + tab + field value + return
-	// the "return is consumed outside parse_serial by the readline command
-	// the "tab" is consumed by the split command at the top of this function
-	checksum.update(line);
-        if (res[0] === undefined) return;
-	if (packageArrivalTime === 0) packageArrivalTime = new Date();
-        if (res[0] in map && map[res[0]] !== undefined) map[res[0]].newValue = res[1];
-        else logger.warn("parse_serial: " + res[0] + " is not registered and has value " + res[1]);
-    }
-};
 
 
 
@@ -402,9 +262,6 @@ function append_checksumNew(cmd) {
     return cmd + ("0" + checksum.toString(16)).slice(-2).toUpperCase();
 }
 
-
-// move declaration into class CommandMessageQ
-var responseMap = {};
 
 var sendMessageDeferTimer = null;
 
@@ -719,48 +576,6 @@ class Response extends Message {
 	if (!this.isValid(cmdStr)) return;
 
 	super.parse(cmdStr);
-	
-	if (this.getId() in responseMap)
-	{
-	    clearTimeout(responseMap[this.id].timerId)
-	    logger.debug(this.id + " in responseMap ==> clear timeout");
-	    // logger.errors are for finding conv.hexToInt issue (to be removed)
-	    responseMap[this.id].func(this);
-	}
-	else if (this.isCommand(pingCommand) || this.isCommand(versionCommand))
-	{
-	    // returns e.g. 5 05 43 (without spaces for ping) ==> value = 0x4305 ==> version 3.05
-	    // or returns e.g. 1 05 43 for app version call
-	    if (this.id.length > 4 && this.id[3] === "4") {
-		this.value = this.id[4] + "." + this.id.substring(1, 3);
-		logger.info("Device software version " + this.value);
-	    }
-	    else logger.warn("Invalid reply to ping: " + id);
-	    // CS is 0x55 - where and when is it tested?
-	}
-	else if (this.id[0] === '3')
-	{
-	    logger.debug("unkown command" + this.id.substring(0, this.id.length-1));
-	}
-	else if (this.id === "40000") // reply after restart
-	{
-	    logger.debug("restart successful");
-	}
-	// BMV-7xx HEX Protocol describes that the device returns "AAAA" in case
-	// of a framing error, however, experiments showed that the response
-	// to a framing error looks like "2AAAA". The following implementation
-	// caters both cases:
-	else if (cmdStr.substring(0, 4) === "AAAA"
-		 || cmdStr.substring(0, 5) === "2AAAA")
-	{
-	    logger.error("framing error");
-	}
-	else
-	{
-	    // FIXME: was this.id - does this now print the entire object? test!
-	    logger.warn("unwarrented command " + this.toString() + " received - ignored");
-	}
-	// TODO: check regularly for left overs in responseMap and cmdMessageQ
     }
 }
 
@@ -788,6 +603,10 @@ class Command extends Message {
 
     setPriority(p) {
 	this.priority = p;
+    }
+
+    setMaxRetries(mr) {
+	this.maxRetries = mr;
     }
 
     // \param cmd is out of {pingCommand, versionCommand, getCommand, setCommand, asyncSetCommand}
@@ -829,16 +648,13 @@ class CommandMessageQ {
     constructor(){
 	logger.trace('CommandMessageQ::constructor');
 	this.cmdMessageQ = [];
-	this.sendMessageDeferTimer = null;
-	this.deferalTimeInMs = 1000;
-	// measured max response time approx. 3984ms
-	this.cmdResponseTimeoutMS = 6000; // milliseconds
+	//this.isOperational = false;
 	// two subsequent messages with the same command (and possible different
 	// parameters) are "compressed" into one command with the parameters of
 	// the second message
 	this.cmdCompression = true;
-	this.maxResponseTime = 0;
-	this.open('/dev/serial/by-id/usb-VictronEnergy_BV_VE_Direct_cable_VE1SUT80-if00-port0');
+	//this.maxResponseTime = 0;
+	//this.open('/dev/serial/by-id/usb-VictronEnergy_BV_VE_Direct_cable_VE1SUT80-if00-port0');
     }
 
     // \param value is either true or false
@@ -848,15 +664,9 @@ class CommandMessageQ {
 	this.cmdCompression = value;
     }
 
-    restart() {
-    	logger.trace("CommandMessageQ::restart");
-	logger.debug("CommandMessageQ::restart"); // FIXME temporary as debug
-    	this.port.write(':64F\n'); 
-    }
-
     // \brief  delete element indexNo in the Q
     // \return the cmdMessageQ[indexNo]
-    delete(indexNo) {
+    del(indexNo) {
 	let lastCmd;
 	if (indexNo >= 0 && indexNo < this.cmdMessageQ.length) {
 	    lastCmd = (this.cmdMessageQ.splice(indexNo, 1))[0]; // finished work on this message - dump
@@ -865,49 +675,6 @@ class CommandMessageQ {
 	}
 	logger.debug("Cmd Q: " + this.cmdMessageQ.length);
 	return lastCmd;
-    }
-
-    responseTimeoutHandler(response) {
-	logger.trace('CommandMessageQ::responseTimeoutHandler');
-	const responseId = response.getId();
-	
-	logger.error("timeout - no response to "
-                     + response.getMessage() + " within "
-                     + this.cmdResponseTimeoutMS + "ms");
-	let sendTypeStr = "Sending next command ";
-	if (responseId in responseMap)
-	{
-	    sendTypeStr = "Repeating command ("
-		+ responseMap[responseId].doRetry + ") ";
-	    // FIXME: after restart the following response received: 4000051
-	    if (responseMap[responseId].doRetry % 5 === 0) this.restart(); // TODO: put 5 as param/config
-            if (responseMap[responseId].doRetry <= 0)
-            {
-		// FIXME: don't delete but mark as timedout in case message still arrives
-		delete responseMap[responseId];
-
-		let cmdQIndex = this.find(responseId);
-		if (cmdQIndex !== this.cmdMessageQ.length)
-		{
-		    this.delete(cmdQIndex); // finished work on this message - dump
-		}
-		else logger.debug("Cmd Q: " + this.cmdMessageQ.length);
-		//reject(new Error('timeout - no response received within 30 secs'));
-		sendTypeStr = "Sending next command ";
-            }
-	}
-	else {
-	    logger.warn(responseId + " not in responseMap");
-	}
-	
-	if (this.cmdMessageQ.length > 0)
-	{
-	    this.cmdMessageQ[0].setPriority(1);
-            const nextCmd = this.cmdMessageQ[0];
-            logger.debug(sendTypeStr + ": " + trim(nextCmd.getMessage()));
-	    // FIXME: do we need to delete something from cmdMessageQ??
-            this.runMessageQ();
-	}
     }
 
     find(responseId) {
@@ -927,152 +694,36 @@ class CommandMessageQ {
 		logger.error("MessageQ empty");
 	    else {
 		logger.error("MessageQ is:");
-		// FIXME: use every?!
 		this.cmdMessageQ.map(c => logger.error(trim(c.getMessage())));
 	    }
 	}
 	return cmdQIndex;
     }
 
-    // \param response is an object of type Response
-    // \post  at every exit of responseHandler the Q must be run with the remaining elements
-    // \return -2 means the response does not map any queued command
-    //        -1 response contained an error
+    // FIXME: find and delete should be part of the array stuff
+
+    // \brief finds id in this.cmdMessageQ and deletes it
+    // \param id as returned by Message::getId()
+    // \return -1 means the id does not match any queued command
     //        0 response is OK
-    responseHandler(response) {
-	logger.trace("CommandMessageQ::responseHandler: " + response.toString());
-	let retval = 0;
-	let receivedTime = new Date();
-	this.maxResponseTime = Math.max(this.maxResponseTime,
-					receivedTime - responseMap[response.id].sentTime);
-	// response contains the message without leading : and trailing \n
-	const responseId = response.getId();
-	let   cmdQIndex = this.find(responseId);
-	if (cmdQIndex === this.cmdMessageQ.length)
+    delete(id) {
+	let retval = isOK;
+	const cmdQIndex = this.find(id);
+	if (cmdQIndex === this.getQLength())
 	{
-	    retval = -2;
+	    retval = isUnknownID;
 	}
-
-        if (retval === 0 && response.getState() !== 0) {
-	    retval = -1;
-	}
-
-	if (retval === 0) {
-            const address = "0x" + response.getAddress();
-            if (address in addressCache)
-            {
-		// TODO: add sentTime, receivedTime fields to each object
-		addressCache[address].newValue = addressCache[address].fromHexStr(response.value);
-		logger.debug("response for " + address + ": updating cache");
-		updateCacheObject(addressCache[address], true); // ignore returned object
-            }
-            else {
-		logger.warn(address + " is not in addressCache");
-		// FIXME: the creation of a new object? Does it make sense?
-		//addressCache[address] = new Object();
-		//addressCache[address].newValue = conv.hexToUint(strValue);
-            }
-	}
-	//TODO: if response does not match expected response sendMsg(message, priority) again.
-	this.delete(cmdQIndex);
-
-	delete responseMap[responseId]; // FIXME: should we leave it in the responseMap and clean it e.g. every 10min
-
-	this.runMessageQ();
+	else this.del(cmdQIndex);
 	return retval;
     }
 
-    // TODO: rename to \param response is of class Command FIXME: should it not be class Response?
-    // FIXME: replace command to getResponseTo(command)
-    // \param cmdFrame looks like: :caaaaffvv..ss\n
-    getResponse(cmdFrame) {
-	logger.trace("CommandMessageQ::getResponse(" + cmdFrame.toString() + ")");
-	let that = this;
-	return new Promise(function(resolve, reject)
-			   {
-			       const response = new Message(cmdFrame.getMessage().substring(1, cmdFrame.getMessage().length));
-			       let responseId = response.getId();
-			       logger.debug("Adding " + responseId + " to reponseMap");
+    // start() {
+    // 	this.isOperational = true;
+    // }
 
-			       //var tid = setTimeout(this.responseTimeoutHandler, this.cmdResponseTimeoutMS, cmdFrame);
-			       const tid = setTimeout(
-				   function() // do these params need bind?
-				   {
-				       that.responseTimeoutHandler(response);
-				   }, that.cmdResponseTimeoutMS, response);
-
-			       logger.debug("Timeout set to " + that.cmdResponseTimeoutMS
-					    + "ms for " + responseId)
-			       let newRetries = cmdFrame.maxRetries;
-			       if (responseId in responseMap)
-				   newRetries = responseMap[responseId].doRetry-1;
-			       responseMap[responseId] = {
-				   func:    resolve.bind(this),
-				   timerId: tid,
-				   doRetry: newRetries,
-				   sentTime: new Date(),
-			       };
-			       that.port.write(cmdFrame.getMessage());
-			       logger.debug(cmdFrame.getMessage().substring(0, cmdFrame.getMessage().length-1)
-					    + " sent to device");
-			   });
-    }
-
-    // \detail starts or continues working the commands in the message Q
-    //         if serial port is operational and Q is not empty.
-    runMessageQ()
-    {
-	logger.trace('CommandMessageQ::runMessageQ');
-	if (this.cmdMessageQ.length > 0) {
-            if (isSerialOperational)
-            {
-		if (this.sendMessageDeferTimer != null) {
-                    clearTimeout(this.sendMessageDeferTimer);
-		}
-		this.cmdMessageQ[0].setPriority(1);
-		const nextCmd = this.cmdMessageQ[0];
-		
-		// TODO:
-		// const address = "0x" + nextCmd.substring(4, 6) + nextCmd.substring(2, 4);
-		// const value = nextCmd.substring(6, nextCmd.length-2);
-		// // TODO: endianian value
-		// if (addressCache[address].value ==
-		//  addressCache[address].fromHexStr(strValue)) // FIXME: does convert do the job?
-		// {
-		//  logger.debug("Cached value same as command value - ignoring");
-		//  return;
-		// }
-
-		logger.debug("Sending " + trim(nextCmd.getMessage()));
-		this.getResponse(nextCmd).then(this.responseHandler.bind(this))
-                    .catch(function(reject) {
-			logger.warn("Reject: " + reject.message);
-                    });
-            }
-            else
-            {
-		let multipleStr = "another time ";
-		if (this.sendMessageDeferTimer === null) // first deferal
-		{
-		    logger.debug("Port not yet operational");
-		    multipleStr = "first time ";
-		}
-                logger.debug("==> message deferred " + multipleStr + "by "
-			     + this.deferalTimeInMs + " milliseconds");
-		clearTimeout(this.sendMessageDeferTimer);
-                //sendMessageDeferTimer = setTimeout(this.runMessageQ, 1000, true ) ;
-                this.sendMessageDeferTimer = setTimeout(function()
-							{
-							    logger.debug("Running deferred message Q");
-							    this.runMessageQ();
-							}.bind(this), this.deferalTimeInMs);
-		// else a new message came in but port not yet operational
-		// ==> don't start another timer
-            }
-	}
-	else
-            logger.debug("MessageQ empty");
-    }
+    // stop() {
+    // 	this.isOperational = false;
+    // }
 
     // \pre    the priorities in cmdMessageQ must be descending
     // \return the next index of the element that has at least priority
@@ -1128,6 +779,7 @@ class CommandMessageQ {
 	}
 	else
 	{
+
             // never execute the very same command with same parameters
 	    // twice as it is like bouncing
             if (l === 0 || this.cmdMessageQ[l-1].getMessage() != cmd.getMessage())
@@ -1144,6 +796,296 @@ class CommandMessageQ {
 	//this.cmdMessageQ.map(c => logger.error(trim(c.getMessage())));
     }
 
+    isEmpty() {
+	return (this.cmdMessageQ.length === 0);
+    }
+
+    getQLength() {
+	return this.cmdMessageQ.length;
+    }
+}
+
+
+//logger.debug("MessageQ is:");
+//this.cmdMessageQ.map(c => logger.error(trim(c.getMessage())));
+class ReceiverTransmitter {
+    constructor() {
+	this.isRecording = false;
+        this.isOperational = false;
+	this.sendMessageDeferTimer = null;
+	this.deferalTimeInMs = 1000;
+	// measured max response time approx. 3984ms
+	this.cmdResponseTimeoutMS = 6000; // milliseconds
+	this.checksum = new RegularUpdateChecksum();
+	this.responseMap = {};
+	this.cmdQ = new CommandMessageQ();
+	this.port = null;
+	this.open('/dev/serial/by-id/usb-VictronEnergy_BV_VE_Direct_cable_VE1SUT80-if00-port0');
+	this.maxResponseTime = 0;
+	this.record_file = fs.createWriteStream(__dirname + '/serial-test-data.log', {flags: 'w'});
+    }
+
+    updateCacheObject(obj, doLog) {
+	let change = new Object();
+	if (obj.newValue != null && obj.value !== obj.newValue)
+	{
+            let oldValue = obj.value;
+            obj.value = obj.newValue; // accept new values
+            // send event to listeners with values
+            // on() means if update applied,
+            
+            if (obj.on !== null) // && Math.abs(obj.value - obj.newValue) >= obj.precision)
+            {
+		// FIXME: sort out packageArrivalTime
+		obj.on(obj.newValue, oldValue, obj.precision, packageArrivalTime);
+            }
+	    change.newValue  = obj.newValue;
+	    change.oldValue  = oldValue;
+	    change.precision = obj.precision;
+            if (doLog) logger.debug(obj.shortDescr
+                                    + " = " + oldValue
+                                    + " updated with " + obj.newValue);
+	}
+	obj.newValue = null;
+	return change;
+    }
+
+    updateValuesAndValueListeners(doLog) {
+	logger.trace('ReceiverTransmitter::updateValuesAndValueListeners');
+	let mapOfChanges = {};
+	for (const [key, obj] of Object.entries(map)) {
+	    mapOfChanges[key] = this.updateCacheObject(obj, doLog);
+	}
+	// FIXME: enable once updateValuesAndValueListeners is member of class VitronEl....
+	//if (this.on !== null) this.on(mapOfChanges, packageArrivalTime);
+    }
+
+    discardValues() {
+	logger.trace('ReceiverTransmitter::discardValues');
+	// FIXME: should only discard values that are coming from regular updates
+	for (const [key, obj] of Object.entries(map)) {
+            obj.newValue = null; // dump new values
+	} 
+    }
+
+    evaluate(response) {
+	const id = response.getId();
+	if (id in this.responseMap)
+	{
+	    clearTimeout(this.responseMap[id].timerId)
+	    logger.debug(id + " in responseMap ==> clear timeout");
+	    // logger.errors are for finding conv.hexToInt issue (to be removed)
+	    switch (this.responseMap[id].func(response)) {
+	    default: // getState is called and already prints the error if state is not OK
+		break;
+	    case isUnknownID:
+		logger.error(id + " not found in responseMap");
+	    }
+	}
+	else if (response.isCommand(pingCommand) || response.isCommand(versionCommand))
+	{
+	    // returns e.g. 5 05 43 (without spaces for ping) ==> value = 0x4305 ==> version 3.05
+	    // or returns e.g. 1 05 43 for app version call
+	    if (id.length > 4 && id[3] === "4") {
+		const value = id[4] + "." + id.substring(1, 3);
+		logger.info("Device software version " + value);
+	    }
+	    else logger.warn("Invalid reply to ping: " + id);
+	    // CS is 0x55 - where and when is it tested?
+	}
+	else if (id[0] === '3')
+	{
+	    logger.debug("unkown command" + id.substring(0, response.id.length-1));
+	}
+	else if (id === "40000") // reply after restart
+	{
+	    logger.debug("restart successful");
+	}
+	// BMV-7xx HEX Protocol describes that the device returns "AAAA" in case
+	// of a framing error, however, experiments showed that the response
+	// to a framing error looks like "2AAAA". The following implementation
+	// caters both cases:
+	else if (id.substring(0, 4) === "AAAA" || id === "2AAAA")
+	{
+	    logger.error("framing error");
+	}
+	else
+	{
+	    // FIXME: was response.id - does this now print the entire object? test!
+	    logger.warn("unwarrented command " + response.toString() + " received - ignored");
+	}
+	// TODO: check regularly for left overs in responseMap and cmdMessageQ
+    }
+
+    open(ve_port) {
+	logger.trace('ReceiverTransmitter::open(.)');
+        this.port =  new serialport(ve_port, {
+            baudrate: 19200,
+            parser: serialport.parsers.readline('\r\n', 'binary')});
+        this.port.on('data', function(line) {
+            this.isOperational = true;
+            if (this.isRecording)
+            {
+                this.record_file.write(line + '\r\n');
+            }
+            this.parse_serial(line);
+        }.bind(this));
+    }
+
+    close() {
+	logger.trace('ReceiverTransmitter::close');
+	logger.debug('Max. command response time: ' + this.maxResponseTime + ' ms');
+        this.port.close();
+    }
+
+    parse_serial(line) {
+	logger.trace('ReceiverTransmitter::parse_serial');
+	let res = line.split("\t");
+	if (!res[0] || res[0] === "")
+	{
+	    if (res[1] && res[1].length > 1 && res[1].substring(1, res[1].length).split(':'))
+	    {
+		logger.warn("Content found after tab without key");
+	    }
+	    return; // empty string
+	}
+
+	const checksumKey = "Checksum";
+	if (res[0] === checksumKey)
+	{
+	    // Calculating checksum of "Checksum\t" (word Checksum + tab)
+	    //
+	    //              C  h   e   c  k   s   u   m   \t
+	    // ASCII value: 67+104+101+99+107+115+117+109+11 = 828
+	    //
+	    // Looking at the oldCS and the expectedCS after receiving "Checksum\t":
+	    //
+	    // (oldCS + 828 + expectedCS) % 256 === 0!
+	    // ==> (oldCS % 256) + (828 % 256) + expectedCS === 0 (expectedCS < 256)
+	    // ==> expectedCS = -(oldCS % 256) - 60
+	    //                = 256 - (oldCS % 256) + 196  
+	    let expectedCS = (256 - (this.checksum.get() % 256) + 196) % 256; // Checksum+\t
+	    if (expectedCS < 0) { expectedCS = expectedCS + 256; }
+
+	    // line may contain garbage after the checksum, therefore
+	    // restrict the line to the checksumKey plus tab plus the checksum value
+	    let cs = this.checksum.update(line.substring(0, checksumKey.length + 2));
+            cs = cs % 256;
+            if (cs === 0) // valid checksum for periodic frames
+            {
+		this.updateValuesAndValueListeners(false);
+            }
+            else // checksum invalid
+            {
+		this.discardValues();
+		const expStr = " - expected: 0x" + expectedCS.toString(16)
+                      + ' (' + expectedCS + ')';
+		const prefix = "data set checksum: ";
+		if (res[1].length === 0)
+		{
+		    logger.error(prefix + "checksum missing" + expStr);
+		}
+		else // in case a response arrived, checksum is mostly invalid => no error
+		{
+		    const isStr = "0x" + res[1].charCodeAt(0).toString(16) + ' ('
+			  + res[1].charCodeAt(0)
+			  + ")";
+		    logger.warn(prefix + isStr + expStr);
+		}
+            }
+	    packageArrivalTime = 0;
+            this.checksum.reset(); // checksum field read => reset checksum
+            // frame always finishes before another frame
+            // or before a command response arrives.
+            // Check for command response now:
+
+	    // res[1] contain the checksum of the previous frequent update package,
+	    // and at least the : and the command
+            if (res[1].length <= 3) return;
+            // checksum value is followed by optional garbage and
+            // optional command responses all in res[1].
+            // First char of res[1] contains checksum value so start from 1:
+            // None, one or several command responses can follow a frame.
+            // Command responses always start with : and end with \n.
+            var cmdSplit = res[1].substring(1, res[1].length).split(':');
+	    // split "swallows" the colon : so each element cmdSplit
+	    // has the format caaaammv...vss\n.
+            var cmdIndex;
+            for (cmdIndex = 1; cmdIndex < cmdSplit.length; ++cmdIndex) {
+		logger.debug("Creating response for " + cmdSplit[cmdIndex]);
+		const r = new Response(cmdSplit[cmdIndex]);
+		this.evaluate(r);
+            }
+	}
+	else
+	{
+	    // a line consist of:
+	    // field name + tab + field value + return
+	    // the "return is consumed outside parse_serial by the readline command
+	    // the "tab" is consumed by the split command at the top of this function
+	    this.checksum.update(line);
+            if (res[0] === undefined) return;
+	    if (packageArrivalTime === 0) packageArrivalTime = new Date();
+            if (res[0] in map && map[res[0]] !== undefined) map[res[0]].newValue = res[1];
+            else logger.warn("parse_serial: " + res[0] + " is not registered and has value " + res[1]);
+	}
+    };
+
+    // \detail starts or continues working the commands in the message Q
+    //         if serial port is operational and Q is not empty.
+    runMessageQ()
+    {
+	logger.trace('ReceiverTransmitter::runMessageQ');
+	if (this.cmdQ.isEmpty()) {
+            logger.debug("MessageQ empty");
+	    return;
+	}
+        if (this.isOperational)
+        {
+	    if (this.sendMessageDeferTimer != null) {
+                clearTimeout(this.sendMessageDeferTimer);
+	    }
+	    this.cmdQ.cmdMessageQ[0].setPriority(1);
+	    const nextCmd = this.cmdQ.cmdMessageQ[0];
+	    
+	    // TODO:
+	    // const address = "0x" + nextCmd.substring(4, 6) + nextCmd.substring(2, 4);
+	    // const value = nextCmd.substring(6, nextCmd.length-2);
+	    // // TODO: endianian value
+	    // if (addressCache[address].value ==
+	    //  addressCache[address].fromHexStr(strValue)) // FIXME: does convert do the job?
+	    // {
+	    //  logger.debug("Cached value same as command value - ignoring");
+	    //  return;
+	    // }
+
+	    logger.debug("Sending " + trim(nextCmd.getMessage()));
+	    this.getResponse(nextCmd).then(this.responseHandler.bind(this))
+                .catch(function(reject) {
+		    logger.warn("Reject: " + reject.message);
+                });
+        }
+        else
+        {
+	    let multipleStr = "another time ";
+	    if (this.sendMessageDeferTimer === null) // first deferal
+	    {
+		logger.debug("Port not yet operational");
+		multipleStr = "first time ";
+	    }
+            logger.debug("==> message deferred " + multipleStr + "by "
+			 + this.deferalTimeInMs + " milliseconds");
+	    clearTimeout(this.sendMessageDeferTimer);
+            //sendMessageDeferTimer = setTimeout(this.runMessageQ, 1000, true ) ;
+            this.sendMessageDeferTimer = setTimeout(function()
+						    {
+							logger.debug("Running deferred message Q");
+							this.runMessageQ();
+						    }.bind(this), this.deferalTimeInMs);
+	    // else a new message came in but port not yet operational
+	    // ==> don't start another timer
+        }
+    }
 
     // \details
     //   - Puts the message into the Q
@@ -1155,11 +1097,10 @@ class CommandMessageQ {
     //       the BMV is so slow that almost any reasonable timeout will expire if
     //       several commands are in the Q. Force command implemented instead.
     sendMsg(message) {
+	logger.trace('ReceiverTransmitter::sendMsg: ' + message.toString() + "\\n");
+	const isQEmpty = this.cmdQ.isEmpty(); // must be retrieved before Q_push_back
 
-	logger.trace('CommandMessageQ::sendMsg: ' + message.toString() + "\\n");
-	const isQEmpty = (this.cmdMessageQ.length === 0); // must be set before Q_push_back
-
-        this.Q_push_back(message);
+        this.cmdQ.Q_push_back(message);
 	if (isQEmpty)
 	{
             this.runMessageQ();
@@ -1193,40 +1134,145 @@ class CommandMessageQ {
             });
     }
 
-    open(ve_port) {
-	logger.trace('CommandMessageQ::open(.)');
-        this.port =  new serialport(ve_port, {
-            baudrate: 19200,
-            parser: serialport.parsers.readline('\r\n', 'binary')});
-        this.port.on('data', function(line) {
-            isSerialOperational = true;
-            if (this.isRecording)
-            {
-                record_file.write(line + '\r\n');
-            }
-            parse_serial(line);
-        });
+    restart() {
+    	logger.trace("ReceiverTransmitter::restart");
+	logger.debug("ReceiverTransmitter::restart"); // FIXME temporary as debug
+    	this.port.write(':64F\n'); 
     }
 
-    close() {
-	logger.trace('CommandMessageQ::close');
-	logger.debug('Max. command response time: ' + this.maxResponseTime + ' ms');
-        this.port.close();
+    // \param response is of class Response
+    responseTimeoutHandler(response) {
+	logger.trace('ReceiverTransmitter::responseTimeoutHandler');
+	const responseId = response.getId();
+	
+	logger.error("timeout - no response to "
+                     + response.getMessage() + " within "
+                     + this.cmdResponseTimeoutMS + "ms");
+	this.maxResponseTime += this.cmdResponseTimeoutMS;
+	let sendTypeStr = "Sending next command ";
+	if (responseId in this.responseMap)
+	{
+	    sendTypeStr = "Repeating command ("
+		+ this.responseMap[responseId].doRetry + ") ";
+	    // FIXME: after restart the following response received: 4000051
+	    if (this.responseMap[responseId].doRetry % 5 === 0) this.restart(); // TODO: put 5 as param/config
+            if (this.responseMap[responseId].doRetry <= 0)
+            {
+		// FIXME: don't delete but mark as timedout in case message still arrives
+		delete this.responseMap[responseId];
+
+		// FIXME: create a delete(responseId) which make it more usable
+		if (this.cmdQ.delete(responseId) !== isOK)
+		    logger.debug("Cmd Q: " + this.cmdQ.getQLength());
+		//reject(new Error('timeout - no response received within 30 secs'));
+		sendTypeStr = "Sending next command ";
+            }
+	}
+	else {
+	    logger.warn(responseId + " not in responseMap");
+	}
+	
+	if (! this.cmdQ.isEmpty())
+	{
+	    this.cmdQ.cmdMessageQ[0].setPriority(1);
+            const nextCmd = this.cmdQ.cmdMessageQ[0];
+            logger.debug(sendTypeStr + ": " + trim(nextCmd.getMessage()));
+	    // FIXME: do we need to delete something from cmdMessageQ??
+            this.runMessageQ();
+	}
+    }
+
+    // \param response is an object of type Response
+    // \post  at every exit of responseHandler the Q must be run with the remaining elements
+    // \return -1 means the response does not map any queued command
+    //        -2 response contained an error
+    //        0 response is OK
+    responseHandler(response) {
+	logger.trace("ReceiverTransmitter::responseHandler: " + response.toString());
+	let receivedTime = new Date();
+	this.maxResponseTime = Math.max(this.maxResponseTime,
+					receivedTime - this.responseMap[response.getId()].sentTime);
+	// response contains the message without leading : and trailing \n
+	const responseId = response.getId();
+	let   errStatus = this.cmdQ.delete(responseId);
+
+        if (errStatus === isOK) {
+	    errStatus = response.getState();
+	}
+
+	if (errStatus === isOK) {
+            const address = "0x" + response.getAddress();
+            if (address in addressCache)
+            {
+		// TODO: add sentTime, receivedTime fields to each object
+		// FIXME urgent: response.value does not exist!!
+		addressCache[address].newValue = addressCache[address].fromHexStr(response.getValue());
+		logger.debug("response for " + address + ": updating cache");
+		this.updateCacheObject(addressCache[address], true); // ignore returned object
+            }
+            else {
+		logger.warn(address + " is not in addressCache");
+		// FIXME: the creation of a new object? Does it make sense?
+		//addressCache[address] = new Object();
+		//addressCache[address].newValue = conv.hexToUint(strValue);
+            }
+	}
+	//TODO: if response does not match expected response sendMsg(message, priority) again.
+
+	delete this.responseMap[responseId]; // FIXME: should we leave it in the responseMap and clean it e.g. every 10min
+
+	this.runMessageQ();
+	return errStatus;
+    }
+
+    // FIXME: move to class RT
+    // TODO: rename to \param response is of class Command FIXME: should it not be class Response?
+    // FIXME: replace command to getResponseTo(command)
+    // \param cmdFrame looks like: :caaaaffvv..ss\n
+    getResponse(cmdFrame) {
+	logger.trace("ReceiverTransmitter::getResponse(" + cmdFrame.toString() + ")");
+	let that = this;
+	return new Promise(function(resolve, reject)
+			   {
+			       const response = new Message(cmdFrame.getMessage().substring(1, cmdFrame.getMessage().length));
+			       let responseId = response.getId();
+			       logger.debug("Adding " + responseId + " to reponseMap");
+
+			       //var tid = setTimeout(this.responseTimeoutHandler, this.cmdResponseTimeoutMS, cmdFrame);
+			       const tid = setTimeout(
+				   function() // do these params need bind?
+				   {
+				       that.responseTimeoutHandler(response);
+				   }, that.cmdResponseTimeoutMS, response);
+
+			       logger.debug("Timeout set to " + that.cmdResponseTimeoutMS
+					    + "ms for " + responseId)
+			       let newRetries = cmdFrame.maxRetries;
+			       if (responseId in that.responseMap)
+				   newRetries = that.responseMap[responseId].doRetry-1;
+			       that.responseMap[responseId] = {
+				   func:    resolve.bind(that),
+				   timerId: tid,
+				   doRetry: newRetries,
+				   sentTime: new Date(),
+			       };
+			       that.port.write(cmdFrame.getMessage());
+			       logger.debug(cmdFrame.getMessage().substring(0, cmdFrame.getMessage().length-1)
+					    + " sent to device");
+			   });
     }
 }
 
 
 
-
 class VitronEnergyDevice {
 
-    constructor(){
+    constructor() {
 	logger.trace('VitronEnergyDevice::constructor');
         // set isRecording true to record the incoming data stream to record_file
-        this.isRecording = false;
 	this.on = null;
         if(! VitronEnergyDevice.instance){
-	    this.cmdQ = new CommandMessageQ();
+	    this.cmdQ = new ReceiverTransmitter();
             VitronEnergyDevice.instance = this;
         }
         return VitronEnergyDevice.instance;
