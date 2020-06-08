@@ -930,26 +930,47 @@ class ReceiverTransmitter {
 
     evaluate(response) {
         const id = response.getId();
-        if (id in this.responseMap)
+
+        // An inValid response has a wrong CRC. Any part of the message can
+        // be corrupt. Hence the address may not be correct and it has to be
+        // ignored. The timeout mechanism will kick in to repeat this message.
+        if ( ! response.isValid(response.getMessage()) ) {
+            // in this case response.getId() may not be corrupt and not be in responseMap
+            logger.debug('Invalid response - CRC error - repeating message');
+            // leave message in Q and run Q again to repeat the command that failed
+        } 
+        else if (id in this.responseMap)
         {
             clearTimeout(this.responseMap[id].timerId)
             logger.debug(id + ' in responseMap ==> clear timeout');
             // logger.errors are for finding conv.hexToInt issue (to be removed)
-            switch (this.responseMap[id].func(response)) {
-            default: // getState is called and already prints the error if state is not OK
-                break;
-            case isUnknownID:
-                logger.error(id + ' not found in responseMap');
+            if (this.responseMap[id].expect
+                !== response.getMessage().substring(0, this.responseMap[id].expect.length)) {
+                logger.error('Device refused to set expected value');
             }
-        }
-        else if (id.charAt(0) === unknownResponse)
-        {
-            // FIXME: test with asyncCommand!
-            logger.debug('unkown command ' + id.substring(1));
+            else { // process response and remove it from Q and responseMap
+                switch (this.responseMap[id].func(response)) {
+                default: // getState is called and already prints the error if state is not OK
+                    break;
+                case isUnknownID:
+                    logger.error('Address 0x' + responseMap[id].orgCmdId.substring(1) + ' unknown');
+                }
+            }
+            this.runMessageQ();
         }
         else if (id === '40000') // reply after restart
         {
             logger.debug('restart successful');
+        }
+        // FIXME: if framing error or unkownResponse happens several times
+        //        we may consider to remove the first command from the Q as this may cause
+        //        the issue
+        // in all the following cases the command that causes the issue is not know
+        // ==> nothing to delete out of the Q or responseMap
+        else if (id.charAt(0) === unknownResponse)
+        {
+            // FIXME: test with asyncCommand!
+            logger.debug('unkown command ' + id.substring(1));
         }
         // BMV-7xx HEX Protocol describes that the device returns "AAAA" in case
         // of a framing error, however, experiments showed that the response
@@ -1079,7 +1100,7 @@ class ReceiverTransmitter {
             if (packageArrivalTime === 0) packageArrivalTime = new Date();
             if (res[0] in map && map[res[0]] !== undefined) map[res[0]].newValue = res[1];
             else logger.warn('parse_serial: ' + res[0]
-			     + ' is not registered and has value ' + res[1]);
+                             + ' is not registered and has value ' + res[1]);
         }
     };
 
@@ -1212,6 +1233,7 @@ class ReceiverTransmitter {
         }
     }
 
+    // \brief Processes the response and removes it from the Q and responseMap
     // \param response is an object of type Response
     // \post  at every exit of responseHandler the Q must be run with the remaining elements
     // \return -1 means the response does not map any queued command
@@ -1223,69 +1245,57 @@ class ReceiverTransmitter {
         let errStatus = isOK;
         this.maxResponseTime = Math.max(this.maxResponseTime,
                                         receivedTime - this.responseMap[response.getId()].sentTime);
-        if ( ! response.isValid(response.getMessage()) ) {
-            logger.debug('Invalid response - CRC error - repeating message');
-            // leave message in Q and run Q again to repeat the command that failed
+        const responseId = response.getId();
+        if (response.is(pingResponse) || response.is(doneResponse))
+        {
+            const commandId  = this.responseMap[responseId].orgCmdId;
+            // response contains the message without leading : and trailing \n
+            errStatus = this.cmdQ.delete(commandId);
+            let value = response.getValue();
+            if (commandId === productIdCommand) {
+                bmvdata.productId.newValue = value;
+                this.updateCacheObject(bmvdata.productId, true); // ignore returned object
+                logger.debug('Product Id response: '
+                             + bmvdata.productId.shortDescr + ' '
+                             + bmvdata.productId.formatted() + ' - cache updated');
+            }
+            else { // commandId === versionCommand
+                const releaseCandidate = value.charAt(0);
+                bmvdata.version.newValue = value.substring(1);
+                this.updateCacheObject(bmvdata.version, true); // ignore returned object
+                logger.debug('Ping/Version response: '
+                             + bmvdata.version.shortDescr + ' ' + bmvdata.version.formatted()
+                             + ' release candidate ' + releaseCandidate + ' - cache updated');
+            }
         }
         else {
-            const responseId = response.getId();
-            if (response.is(pingResponse) || response.is(doneResponse))
-            {
-                const commandId  = this.responseMap[responseId].orgCmdId;
-                if (commandId === productIdCommand) {
-                    // response contains the message without leading : and trailing \n
-                    errStatus = this.cmdQ.delete(commandId);
+            // response contains the message without leading : and trailing \n
+            errStatus = this.cmdQ.delete(responseId);
 
-                    let value = response.getValue();
-                    bmvdata.productId.newValue = value;
-                    this.updateCacheObject(bmvdata.productId, true); // ignore returned object
-                    logger.debug('Product Id response: '
-                                 + bmvdata.productId.shortDescr + ' '
-                                 + bmvdata.productId.formatted() + ' - cache updated');
+            if (errStatus === isOK) {
+                errStatus = response.getState();
+            }
+            if (errStatus === isOK) {
+                const address = '0x' + response.getAddress();
+                if (address in addressCache)
+                {
+                    // TODO: add sentTime, receivedTime fields to each object
+                    addressCache[address].newValue = addressCache[address].fromHexStr(response.getValue());
+                    logger.debug('response for ' + address + ': updating cache');
+                    this.updateCacheObject(addressCache[address], true); // ignore returned object
                 }
-                else { // commandId === versionCommand
-                    // response contains the message without leading : and trailing \n
-                    errStatus = this.cmdQ.delete(commandId);
-
-                    let value = response.getValue();
-                    const releaseCandidate = value.charAt(0);
-                    value = value.substring(1);
-                    bmvdata.version.newValue = value;
-                    this.updateCacheObject(bmvdata.version, true); // ignore returned object
-                    logger.debug('Ping/Version response: '
-                                 + bmvdata.version.shortDescr + ' ' + bmvdata.version.formatted()
-                                 + ' release candidate ' + releaseCandidate + ' - cache updated');
+                else {
+                    logger.warn(address + ' is not in addressCache');
+                    // FIXME: the creation of a new object? Does it make sense?
+                    //addressCache[address] = new Object();
+                    //addressCache[address].newValue = conv.hexToUint(strValue);
                 }
             }
-            else {
-                // response contains the message without leading : and trailing \n
-                errStatus = this.cmdQ.delete(responseId);
-
-                if (errStatus === isOK) {
-                    errStatus = response.getState();
-                }
-                if (errStatus === isOK) {
-                    const address = '0x' + response.getAddress();
-                    if (address in addressCache)
-                    {
-                        // TODO: add sentTime, receivedTime fields to each object
-                        addressCache[address].newValue = addressCache[address].fromHexStr(response.getValue());
-                        logger.debug('response for ' + address + ': updating cache');
-                        this.updateCacheObject(addressCache[address], true); // ignore returned object
-                    }
-                    else {
-                        logger.warn(address + ' is not in addressCache');
-                        // FIXME: the creation of a new object? Does it make sense?
-                        //addressCache[address] = new Object();
-                        //addressCache[address].newValue = conv.hexToUint(strValue);
-                    }
-                }
-                //TODO: if response does not match expected response sendMsg(message, priority) again.
-            }
-            delete this.responseMap[responseId]; // FIXME: should we leave it in the responseMap and clean it e.g. every 10min
+            //TODO: if response does not match expected response sendMsg(message, priority) again.
         }
+        delete this.responseMap[responseId]; // FIXME: should we leave it in the responseMap and clean it e.g. every 10min
 
-        this.runMessageQ();
+        //this.runMessageQ();
         return errStatus;
     }
 
