@@ -243,6 +243,7 @@ function register(nativeToUnitFactor, units, shortDescr, options) {
     // initialize defaults for optional parameters:
     obj.description = ""; // default
     obj.precision = 0.01; // default precision -2 digits after dot
+    obj.delta = 0.01; // default delta; if delta exceeded a change propagated via on()
     // TODO: obj.on = []; and implement addListener, deleteListener
     obj.on = null;
     // if values are read from register instead of the frequent value

@@ -741,8 +741,7 @@ class CommandMessageQ {
         let lastCmd;
         if (indexNo >= 0 && indexNo < this.cmdMessageQ.length) {
             lastCmd = (this.cmdMessageQ.splice(indexNo, 1))[0]; // finished work on this message - dump
-            // take last char off which is \n
-            logger.debug(':' + trimLF(lastCmd.getMessage()) + '\\n processed - dequeing');
+            logger.debug(':' + lastCmd.getMessage() + '\\n processed - dequeing');
         }
         logger.debug('Cmd Q: ' + this.cmdMessageQ.length);
         return lastCmd;
@@ -883,10 +882,11 @@ class ReceiverTransmitter {
         this.open('/dev/serial/by-id/usb-VictronEnergy_BV_VE_Direct_cable_VE1SUT80-if00-port0');
         this.maxResponseTime = 0;
         this.record_file = fs.createWriteStream(__dirname + '/serial-test-data.log', {flags: 'w'});
+	this.on = null;
     }
 
     updateCacheObject(obj, doLog) {
-        let change = new Object();
+	let changeObj = null;
         if (obj.newValue != null && obj.value !== obj.newValue)
         {
             let oldValue = obj.value;
@@ -894,30 +894,28 @@ class ReceiverTransmitter {
             // send event to listeners with values
             // on() means if update applied,
 
-            if (obj.on !== null) // && Math.abs(obj.value - obj.newValue) >= obj.precision)
+            if (obj.on !== null && Math.abs(obj.value - obj.newValue) >= obj.delta)
             {
+		changeObj = obj;
                 // FIXME: sort out packageArrivalTime
+		// FIXME: use full obj as first parameter
                 obj.on(obj.newValue, oldValue, obj.precision, packageArrivalTime);
             }
-            change.newValue = obj.newValue;
-            change.oldValue = oldValue;
-            change.precision = obj.precision;
             if (doLog) logger.debug(obj.shortDescr +
                                     ' = ' + oldValue +
                                     ' updated with ' + obj.newValue);
         }
         obj.newValue = null;
-        return change;
+        return changeObj;
     }
 
     updateValuesAndValueListeners(doLog) {
         logger.trace('ReceiverTransmitter::updateValuesAndValueListeners');
-        let mapOfChanges = {};
+        let changedObjects = [];
         for (const[key, obj] of Object.entries(map)) {
-            mapOfChanges[key] = this.updateCacheObject(obj, doLog);
+            changedObjects.push(this.updateCacheObject(obj, doLog));
         }
-        // FIXME: enable once updateValuesAndValueListeners is member of class VitronEl....
-        //if (this.on !== null) this.on(mapOfChanges, packageArrivalTime);
+        if (this.on !== null) this.on(changeObjects, packageArrivalTime);
     }
 
     discardValues() {
@@ -926,6 +924,14 @@ class ReceiverTransmitter {
         for (const [key, obj] of Object.entries(map)) {
             obj.newValue = null; // dump new values
         } 
+    }
+
+    // \brief Set or remove a listener for the list of changes 
+    // \details Set null to remove the listener.
+    registerListener(listener)
+    {
+        logger.trace('ReceiverTransmitter::registerListener');
+	this.on = listener;
     }
 
     evaluate(response) {
@@ -1183,6 +1189,7 @@ class ReceiverTransmitter {
     // \brief restart is send straight to the port without queuing
     restart() {
         logger.trace('ReceiverTransmitter::restart');
+        logger.debug('ReceiverTransmitter::restart'); //FIXME: temporary
         let command = append_checksumNew(restartCommand);
         this.port.write(this.package(command)); // the command is fixed :64F\n
     }
@@ -1346,7 +1353,7 @@ class VitronEnergyDevice {
         // set isRecording true to record the incoming data stream to record_file
         this.on = null;
         if(! VitronEnergyDevice.instance){
-            this.cmdQ = new ReceiverTransmitter();
+            this.rxtx = new ReceiverTransmitter();
             VitronEnergyDevice.instance = this;
         }
         return VitronEnergyDevice.instance;
@@ -1355,11 +1362,11 @@ class VitronEnergyDevice {
 
     restart() {
         logger.trace('VitronEnergyDevice::restart');
-        this.cmdQ.restart();
+        this.rxtx.restart();
     }
         
     stop() {
-        if (this.cmdQ) this.cmdQ.close();
+        if (this.rxtx) this.rxtx.close();
     }
 
     // \param force keep trying until successful
@@ -1371,7 +1378,7 @@ class VitronEnergyDevice {
             maxRetries = 999999;
         const command = new Command(getCommand, address, '', priority, maxRetries);
         logger.debug('Command: ' + command);
-        this.cmdQ.sendMsg(command);
+        this.rxtx.sendMsg(command);
     }
 
     // \param value must be a string of 4 or 8  characters in hexadecimal
@@ -1384,7 +1391,7 @@ class VitronEnergyDevice {
             // maxRetries = MAX_SAFE_INTEGER not defined
             maxRetries = 999999;
         const command = new Command(setCommand, address, value, priority, maxRetries);
-        this.cmdQ.sendMsg(command);
+        this.rxtx.sendMsg(command);
         // TODO: validate value is the returned value?!
     }
 
@@ -1811,7 +1818,7 @@ class VitronEnergyDevice {
             maxRetries = 999999;
         const command = new Command(pingCommand, '', '', priority, maxRetries);
         logger.debug('Command: ' + command);
-        this.cmdQ.sendMsg(command);
+        this.rxtx.sendMsg(command);
     };
 
     app_version(priority, force) {
@@ -1822,7 +1829,7 @@ class VitronEnergyDevice {
             maxRetries = 999999;
         const command = new Command(versionCommand, '', '', priority, maxRetries);
         logger.debug('Command: ' + command);
-        this.cmdQ.sendMsg(command);
+        this.rxtx.sendMsg(command);
     }
 
     productId(priority, force) {
@@ -1833,21 +1840,25 @@ class VitronEnergyDevice {
             maxRetries = 999999;
         const command = new Command(productIdCommand, '', '', priority, maxRetries);
         logger.debug('Command: ' + command);
-        this.cmdQ.sendMsg(command);
+        this.rxtx.sendMsg(command);
     }
     
-    registerListener(bmvdataKey, listener)
+    // \brief Set or remove a listener (one listener per property)
+    // \details Set null to remove the listener.
+    //        If property is 'Checksum' then a map of changed
+    //        values is handed over to listener.
+    registerListener(property, listener)
     {
         logger.trace('VitronEnergyDevice::registerListener');
-        if (bmvdataKey === 'Checksum') this.on = listener;
-        else bmvdata[bmvdataKey].on = listener;
+        if (property === 'ChangeList') this.rxtx.registerListener(listener);
+        else bmvdata[property].on = listener;
     }
     
-    hasListener(bmvdataKey)
+    hasListener(property)
     {
         logger.trace('VitronEnergyDevice::hasListener');
-        if (bmvdataKey === 'Checksum') return this.on !== null;
-        else return bmvdata[bmvdataKey].on !== null;
+        if (property === 'Checksum') return this.on !== null;
+        else return bmvdata[property].on !== null;
     }
 
     update() {
