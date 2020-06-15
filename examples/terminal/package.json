@@ -1,0 +1,30 @@
+{
+  "name": "BMV_terminal",
+  "version": "0.0.1",
+  "description": "Terminal control for Victron Battery management",
+  "main": "bmv_terminal.js",
+  "_repository": {
+    "type": "git",
+    "url": "https://github.com/MarkusRJK/ve_bms_forecast.git"
+  },
+  "keywords": [
+    "Raspberry PI",
+    "Battery management",
+    "BMV",
+    "Ve.direct"
+  ],
+  "dependencies": {
+      "ve_bms_forecast": "git+https://git@github.com/MarkusRJK/ve_bms_forecast.git#add-singleton_class_ES6",
+      "date": "^1.0.2",
+      "log4js": "^2.0.0",
+      "mathjs": "^5.1.0",
+      "terminal-kit": "~0.24.0"
+  },
+  "author": {
+    "name": "Markus Kohler <Markus.Kohler@udo.edu>"
+  },
+  "scripts": {
+      "start": "screen -r || (screen -d -m -S solar nodejs bmv-terminal.js && screen -r)"
+  },
+  "license": "MIT"
+}
