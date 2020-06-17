@@ -1,6 +1,6 @@
 {
   "name": "ve_bms_forecast",
-  "version": "0.0.1",
+  "version": "0.9.1",
   "description": "Battery management with forecast",
   "main": "index.js",
   "_repository": {
@@ -10,12 +10,10 @@
   "keywords": [
     "Raspberry PI",
     "Battery management",
-    "Node.js",
     "MPPT",
     "BMV",
     "Phoenix Inverter",
-    "Ve.direct",
-    "forecast"
+    "Ve.direct"
   ],
   "dependencies": {
     "@types/express": "^4.17.1",
