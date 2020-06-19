@@ -46,12 +46,12 @@ nav ul {
     list-style: none;
 }
 #pageContent {
-    max-width: 1000px;
+    max-width: 1100px;
     margin: auto;
     border: none;
 }
-main {
-	float: left;
+#main {
+	float: middle;
 	width: 60%;
 }
 aside {
@@ -104,7 +104,7 @@ aside > div {
     margin-right: 10px;
 }
 #consumers img {
-    height: 50px;
+    height: 75px;
     width: auto;
     vertical-align: middle;
     margin-right: 10px;
@@ -131,5 +131,24 @@ body > section {
 		float: none;
 		width: 100%;
 	}
+}
 
+.divTable {
+  display: table;         
+  width: auto;
+  background-color: #eee;         
+  border: 1px solid #666666;         
+  border-spacing: 5px; /* cellspacing:poor IE support for  this */
+  margin: auto; /* brings it more into the middle */
+}
+.divRow {
+  display: table-row;
+  width: auto;
+  clear: both;
+}
+.divCell {
+  float: left; /* fix for  buggy browsers */
+  display: table-column;         
+  width: 200px;         
+  background-color: #ccc;  
 }

@@ -13,65 +13,60 @@
 
 <body>
 	<header>
-		<div id="logo"><img src="/logo.png">HTML5&nbsp;Layout</div>
-		<nav>  
-			<ul>
-				<li><a href="/">Home</a>
-				<li><a href="">All</a>
-				<li><a href="">History</a>
-				<li><a href="">Settings</a>
-			</ul>
-		</nav>
+	  <div id="logo"><img src="images/128x128/home.png"></div>
+	  <nav>  
+	    <ul>
+	      <li><a href="/">Home</a>
+	      <li><a href="">All</a>
+	      <li><a href="">History</a>
+	      <li><a href="">Settings</a>
+	    </ul>
+	  </nav>
 	</header>
-	<section>
-		<strong>Charging</strong>
-	</section>
-	<section id="pageContent">
-		<main role="main">
-			<article>
-				<h2>Alarm state</h2>
-				<p><div id='alarm'></div></p>
-			</article>
-			<article>
-				<h2>Alarm reason</h2>
-				<p><div id='alarmReason'></div></p>
-			</article>
-			<article>
-				<h2>Relay state</h2>
-				<p><div id='relay'></div></p>
-			</article>
-			<article>
-				<h2>Mid voltage</h2>
-				<p><div id='midVoltage'></div></p>
-			</article>
-			<article>
-				<h2>Top voltage</h2>
-				<p><div id='topVoltage'></div></p>
-			</article>
-			<article>
-				<h2>Current</h2>
-				<p><div id='current'></div></p>
-			</article>
-			<article>
-				<h2>SOC</h2>
-				<p><div id='soc'></div></p>
-			</article>
-			<article>
-				<h2>Time to go</h2>
-				<p><div id='timeToGo'></div></p>
-			</article>
-		</main>
-		<aside>
-			<div>Sidebar 1</div>
-			<div>Sidebar 2</div>
-			<div>Sidebar 3</div>
-		</aside>
-	</section>
+	<main role="main">
+	  <section id="pageContent">
+	    <div class="divTable">
+	      <div class="divRow">
+		<div class="divCell" align="center">
+		  <img src="images/128x128/bell.png" id="alarm"/>
+		</div>
+		<div class="divCell" align="center">
+		  <img src="images/128x128/battery-50.png" id="battery1"/>
+		  <div id='soc1'></div>
+		</div>
+		<div  class="divCell" align="center">
+		  <img src="images/128x128/battery-75.png" id="battery2"/>
+		  <div id='soc2'></div>
+		</div>
+		<div  class="divCell" align="center">
+		  <img src="images/128x128/plug.png" id="plug"/>
+		</div>
+		<div  class="divCell" align="center">
+		  <img src="images/128x128/thermometer.png" id="plug"/>
+		</div>
+	      </div>
+	    </div>
+	    <!-- aside>
+		 <div>Sidebar 1</div>
+		 <div>Sidebar 2</div>
+		 <div>Sidebar 3</div>
+		</aside-->
+	  </section>
+	</main>
 	<footer>
 	  <div id="consumers">
-	    <img src="images/light-bulb.png" id="bulb"/>
-	    <img src="images/microwave.png"/>
-	    <img src="images/snow_flake.png"/>
+	    <img src="images/128x128/microwave.png" id="microwave"/>
+	    <img src="images/128x128/fridge.png" id="fridge"/>
+	    <img src="images/128x128/freezer.png" id="freezer"/>
+	    <img src="images/128x128/toaster.png" id="toaster"/>
+	    <img src="images/128x128/mixer.png" id="mixer"/>
+	    <img src="images/128x128/stand-mixer.png" id="stand-mixer"/>
+	    <img src="images/128x128/washing-machine.png" id="washing-machine"/>
+	    <!-- dishwasher -->
+	    <img src="images/128x128/vacuum-cleaner.png" id="vacuum-cleaner"/>
+	    <img src="images/128x128/television.png" id="television"/>
+	    <img src="images/128x128/bulb.png" id="bulb"/>
+	    <img src="images/128x128/heating.png" id="heating"/>
 	  </div>
 	</footer>
 
