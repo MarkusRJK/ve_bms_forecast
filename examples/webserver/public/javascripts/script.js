@@ -15,7 +15,7 @@ onload=function()
               document.getElementById('alarm').innerHTML = data.alarmState;
            if (data.relayState !== undefined)
 	      document.getElementById('relay').innerHTML = data.relayState;
-           if (data.relayState !== undefined)
+           if (data.alarmReason !== undefined)
            //if (alarmReason in data)
 	      document.getElementById('alarmReason').innerHTML = data.alarmReason;
            if (data.midVoltage !== undefined)
