@@ -894,18 +894,13 @@ class ReceiverTransmitter {
             // send event to listeners with values
             // on() means if update applied,
 
-            console.log(obj.shortDescr +
-                                    ' = ' + oldValue +
-                                    ' updating with ' + obj.newValue);
-	    if (obj.on === null) console.log(obj.shortDescr + " has no updater");
-	    //if (Math.abs(obj.value - obj.newValue) < obj.delta) console.log("diff too small");
-            if (obj.on !== null) // && Math.abs(obj.value - obj.newValue) >= obj.delta)
+            if (obj.on !== null
+		&& Math.abs(oldValue - obj.newValue) * obj.nativeToUnitFactor >= obj.delta)
             {
 		changeObj = obj;
                 // FIXME: sort out packageArrivalTime
 		// FIXME: use full obj as first parameter
                 obj.on(obj.newValue, oldValue, obj.precision);
-		console.log("done");
             }
         }
         obj.newValue = null;

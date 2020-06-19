@@ -222,18 +222,18 @@ function register(nativeToUnitFactor, units, shortDescr, options) {
     // format and scale from raw value to unit-value with given precision
     obj.formatted = function() {
 	if (this.value === null || this.nativeToUnitFactor === 0) return this.value;
-	var scaledToIntPrecision = Number(this.value * this.nativeToUnitFactor / this.precision);
-	var div = 1 / this.precision;
-	// TODO: use toFixed  
-	//return scaledToIntPrecision.toFixed(2);
-	return Math.floor(scaledToIntPrecision) / div;
+	// use rounding
+	let div = 1 / this.precision;
+	let scaledToIntPrecision = Number(this.value * this.nativeToUnitFactor * div);
+	// FIXME: occassionally returns x.xx000000000000n for a precision of 0.01
+	return Math.round(scaledToIntPrecision) * this.precision;
     }
     obj.formattedWithUnit = function() {
 	if (this.units === "s")
 	{
 	    // nativeToSIFactor must convert the value to SI i.e. seconds
-	    var timeInSecs = Math.round(this.value * this.nativeToUnitFactor);
-	    var durationStr = "infinity";
+	    let timeInSecs = Math.round(this.value * this.nativeToUnitFactor);
+	    let durationStr = "infinity";
 	    if (timeInSecs >= 0) durationStr = formatSeconds(timeInSecs);
 	    return durationStr;
 	}
@@ -264,6 +264,10 @@ function register(nativeToUnitFactor, units, shortDescr, options) {
     if (options['precision'])
     {
 	obj.precision = Math.pow(10, options['precision']);
+    }
+    if (options['delta'])
+    {
+	obj.delta = Math.pow(10, options['delta']);
     }
     if (options['formatter'])
     {
@@ -643,20 +647,20 @@ function map_components() {
     {
       this.value = bmvdata.upperVoltage.value - bmvdata.midVoltage.value;
       if (this.nativeToUnitFactor === 0) return this.value;
-      var scaledToIntPrecision = Number(this.value * this.nativeToUnitFactor / this.precision);
-      var div = 1 / this.precision;
-      return Math.floor(scaledToIntPrecision) / div;
+      let div = 1 / this.precision;
+      let scaledToIntPrecision = Number(this.value * this.nativeToUnitFactor * div);
+      return Math.floor(scaledToIntPrecision) * this.precision;
     }
 										});
     // bmvdata.topSOC          = register(1,  "%", "Top SOC", {'formatter' : function() 
     // {
-    // 	var topSOC    = estimate_SOC(bmvdata.topVoltage.formatted());
+    // 	let topSOC    = estimate_SOC(bmvdata.topVoltage.formatted());
     // 	topSOC = Math.round(topSOC * 100) / 100;
     // 	return topSOC;
     // }});
     // bmvdata.bottomSOC      = register(1,  "%", "Bottom SOC", {'formatter' : function() 
     // {
-    // 	var bottomSOC = estimate_SOC(bmvdata.midVoltage.formatted());
+    // 	let bottomSOC = estimate_SOC(bmvdata.midVoltage.formatted());
     // 	bottomSOC = Math.round(bottomSOC * 100) / 100;
     // 	return bottomSOC;
     // }});

@@ -33,7 +33,6 @@ function sseDemo(req, res) {
     var portListener = function(newValue, oldValue, precision)
     {
 	if (Math.abs(oldValue - newValue) <= precision) return;
-	console.log("old: " + oldValue + "; new: " + newValue);
 	bmvdata = vedirect.update();
 	let current   = bmvdata.batteryCurrent.formatted();
 	// let topSOC    = getBestEstimateTopSOC(current).toFixed(1);
