@@ -14,6 +14,8 @@ var app = express();
 const vedirect = require( 've_bms_forecast' ).VitronEnergyDevice;
 const Math = require('mathjs');
 
+var bmvterminal = require("./bmv-terminal.js");
+
 var messageId = 0;
 var clientCtr = 0;
 
@@ -37,13 +39,13 @@ function sseDemo(req, res) {
 	let current   = bmvdata.batteryCurrent.formatted();
 	// let topSOC    = getBestEstimateTopSOC(current).toFixed(1);
 	// let bottomSOC = getBestEstimateBottomSOC(current).toFixed(1);
+
 	// let minSOC;
 	// if (topSOC && bottomSOC)
 	//     minSOC = Math.min(topSOC, bottomSOC);
 	// if ((isNaN(bmvdata.stateOfCharge.value)) || bmvdata.stateOfCharge.value * 0.1 > 100
 	//     || bmvdata.stateOfCharge.value * 0.1 < 0)
 	//     if (minSOC) vedirect.setStateOfCharge(minSOC);
-
 	// if (minSOC && Math.abs(bmvdata.stateOfCharge.value * 0.1 - minSOC) >=1)
 	// {
 	//     vedirect.setStateOfCharge(minSOC);
@@ -55,7 +57,7 @@ function sseDemo(req, res) {
 	    'midVoltage' : bmvdata.midVoltage.formattedWithUnit(),
 	    'topVoltage' : bmvdata.topVoltage.formattedWithUnit(),
 	    'current'    : bmvdata.batteryCurrent.formattedWithUnit(),
-	    //'soc'        : bmvdata.stateOfCharge.formattedWithUnit(),
+	    'soc'        : bmvdata.stateOfCharge.formattedWithUnit(),
 	    'timeToGo'   : bmvdata.timeToGo.formattedWithUnit()
 	};
 	// for testing:

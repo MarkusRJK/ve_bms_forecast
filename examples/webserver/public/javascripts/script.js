@@ -8,37 +8,43 @@ onload=function()
         if (soc === undefined) return;
 	let imgElement = 'battery1';
 	let htmlElement = 'soc1';
-	if (soc < 12.5)
-	    document.getElementById(imgElement).src = imgPath + "/battery-0.png";
-	else if (soc < 37.5)
-	    document.getElementById(imgElement).src = imgPath + "/battery-25.png";
-	else if (soc < 62.5)
-	    document.getElementById(imgElement).src = imgPath + "/battery-50.png";
-	else if (soc < 87.5)
-	    document.getElementById(imgElement).src = imgPath + "/battery-75.png";
-	else 
-	    document.getElementById(imgElement).src = imgPath + "/battery-100.png";
+	// if (soc < 12.5)
+	//     document.getElementById(imgElement).src = imgPath + "/battery-0.png";
+	// else if (soc < 37.5)
+	//     document.getElementById(imgElement).src = imgPath + "/battery-25.png";
+	// else if (soc < 62.5)
+	//     document.getElementById(imgElement).src = imgPath + "/battery-50.png";
+	// else if (soc < 87.5)
+	//     document.getElementById(imgElement).src = imgPath + "/battery-75.png";
+	// else 
+	//     document.getElementById(imgElement).src = imgPath + "/battery-100.png";
+	document.getElementById(imgElement).style.height = soc;
+	document.getElementById(imgElement).style.top = 100-soc;
 	document.getElementById(htmlElement).innerHTML = soc;
     }
 
-    const setSOC1 = function(soc) {
+    const setSOC2 = function(soc) {
         if (soc === undefined) return;
 	let imgElement = 'battery2';
 	let htmlElement = 'soc2';
-	if (soc < 12.5)
-	    document.getElementById(imgElement).src = imgPath + "/battery-0.png";
-	else if (soc < 37.5)
-	    document.getElementById(imgElement).src = imgPath + "/battery-25.png";
-	else if (soc < 62.5)
-	    document.getElementById(imgElement).src = imgPath + "/battery-50.png";
-	else if (soc < 87.5)
-	    document.getElementById(imgElement).src = imgPath + "/battery-75.png";
-	else 
-	    document.getElementById(imgElement).src = imgPath + "/battery-100.png";
+	// if (soc < 12.5)
+	//     document.getElementById(imgElement).src = imgPath + "/battery-0.png";
+	// else if (soc < 37.5)
+	//     document.getElementById(imgElement).src = imgPath + "/battery-25.png";
+	// else if (soc < 62.5)
+	//     document.getElementById(imgElement).src = imgPath + "/battery-50.png";
+	// else if (soc < 87.5)
+	//     document.getElementById(imgElement).src = imgPath + "/battery-75.png";
+	// else 
+	//     document.getElementById(imgElement).src = imgPath + "/battery-100.png";
+	document.getElementById(imgElement).style.height = soc;
+	document.getElementById(imgElement).style.top = 100-soc;
 	document.getElementById(htmlElement).innerHTML = soc;
     }
 
     const switchDevices = function(appliances) {
+	// FIXME: use stylesheet property display: hide
+	// or getElementById(..).style.display = hide or none
 	if (appliances.isBulbOn)
 	    document.getElementById('bulb').src = imgPath + "/bulb.png";
 	else document.getElementById('bulb').src = imgPath + "/bulb-bw.png";
@@ -97,8 +103,8 @@ onload=function()
 		   document.getElementById('bulb').src = "images/light-bulb-bw.png";
 	   }
 
-	   setSOC1(50);
-	   setSOC2(25);
+	   setSOC1(data.soc);
+	   setSOC2(data.soc);
 
 	   // switchDevices((appliance)data);
 
