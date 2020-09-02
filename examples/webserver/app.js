@@ -57,7 +57,7 @@ function sseDemo(req, res) {
 	    'midVoltage' : bmvdata.midVoltage.formattedWithUnit(),
 	    'topVoltage' : bmvdata.topVoltage.formattedWithUnit(),
 	    'current'    : bmvdata.batteryCurrent.formattedWithUnit(),
-	    'soc'        : bmvdata.stateOfCharge.formattedWithUnit(),
+	    'soc'        : bmvdata.stateOfCharge.formatted(),
 	    'timeToGo'   : bmvdata.timeToGo.formattedWithUnit()
 	};
 	// for testing:
@@ -68,7 +68,7 @@ function sseDemo(req, res) {
 	let jdata = jsonConfig = JSON.stringify(data);
 	res.write(`id: ${messageId}\n`);
 	res.write(`data: ${jdata}\n\n`);
-	console.log(jdata);
+	//console.log(jdata);
 	//res.write(`data: Test Message -- ${Date.now()}\n\n`);
 	messageId += 1;
     }
