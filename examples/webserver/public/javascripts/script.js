@@ -1,8 +1,9 @@
 
 onload=function()
 {
+
     let imgPath = "images/128x128";
-    
+
     const setSOC = function(soc, batteryNo) {
         if (soc === undefined || soc < 0 || soc > 100) return;
 	let gImgElement = 'gBattery' + batteryNo;
@@ -24,8 +25,6 @@ onload=function()
 		"display:block;height:" + height + "%;top:" + top + "%");
 	document.getElementById(htmlElement).innerHTML = soc.toFixed(0) + "%";
     }
-
-
 
     const switchDevices = function(appliances) {
 	// hide everything:
@@ -92,6 +91,7 @@ onload=function()
 	{
 	    if (data.alarmState === 'ON') {
 		console.log("alarm is on");
+		playSound('sounds/high_priority_alarm.wav');
               	document.getElementById('alarm-on').setAttribute("style", "display:block");
               	document.getElementById('alarm-off').setAttribute("style", "display:none");
             } else {
@@ -126,8 +126,10 @@ onload=function()
         const jdata = e.data;
         const data = JSON.parse(jdata)
 
+	console.log(data);
 	updatePageObject(data);
 	// for testing:
+
 	switchDevices({});
     });
 
@@ -142,7 +144,17 @@ onload=function()
     setSOC(50, 1);
     setSOC(50, 2);
     switchDevices({});
+
 };
+
+// https://stackoverflow.com/questions/10105063/how-to-play-a-notification-sound-on-websites
+
+function playSound(url) {
+  const audio = new Audio(url);
+  audio.play();
+}
+
+
 
 onunload=function()
 {

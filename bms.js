@@ -1,5 +1,5 @@
 var VEdeviceClass = require( 've_bms_forecast' ).VitronEnergyDevice;
-//var bmvterminal = require("./bmv-terminal.js");
+var bmvterminal = require("./bmv-terminal.js");
 
 
 // \class Battery Management System

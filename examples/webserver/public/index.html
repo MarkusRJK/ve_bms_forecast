@@ -30,27 +30,31 @@
 	<div class="divRow">
 	  <div class="divCell" align="center">
 	    <div class="contAlign">
-	      <div class="battery-container">
+	      <div class="bell-container">
+		<img src="images/128x128/bell-bw.png" id="alarm-off"/>
 		<img src="images/128x128/bell.png" id="alarm-on"/>
-		<img class="soc" src="images/128x128/bell-bw.png" id="alarm-off"/>
 	      </div>
 	    </div>
 	  </div>
 	  <div class="divCell" align="center">
 	    <div class="contAlign">
-	      <div class="battery-container">
-		<img src="images/128x128/battery-50.png"/>
-		<img class="soc" src="images/128x128/soc-green.png" id="battery1"/>
-		<div id="soc1"></div>
+	      <div class='battery-container'>
+		<img src="images/128x128/battery-0.png"/>
+		<img class="soc" src="images/128x128/soc-green.png" id="gBattery1"/>
+		<img class="soc" src="images/128x128/soc-orange.png" id="oBattery1"/>
+		<img class="soc" src="images/128x128/soc-red.png" id="rBattery1"/>
+		<div class="value" id="soc1"></div>
 	      </div>
 	    </div>
 	  </div>
 	  <div  class="divCell" align="center">
 	    <div class="contAlign">
-	      <div class="battery-container">
-		<img src="images/128x128/battery-50.png"/>
-		<img class="soc" src="images/128x128/soc-green.png" id="battery2"/>
-		<div id="soc2"></div>
+	      <div class='battery-container'>
+		<img src="images/128x128/battery-0.png"/>
+		<img class="soc" src="images/128x128/soc-green.png" id="gBattery2"/>
+		<img class="soc" src="images/128x128/soc-orange.png" id="oBattery2"/>
+		<img class="soc" src="images/128x128/soc-red.png" id="rBattery2"/>
+		<div class="value" id="soc2"></div>
 	      </div>
 	    </div>
 	  </div>
@@ -66,25 +70,45 @@
 	   <div>Sidebar 1</div>
 	   <div>Sidebar 2</div>
 	   <div>Sidebar 3</div>
-		</aside-->
+</aside-->
     </section>
   </main>
   <footer>
     <div id="consumers">
-      <img src="images/128x128/microwave.png" id="microwave"/>
-      <img src="images/128x128/fridge.png" id="fridge"/>
-      <img src="images/128x128/freezer.png" id="freezer"/>
-      <img src="images/128x128/toaster.png" id="toaster"/>
-      <img src="images/128x128/mixer.png" id="mixer"/>
-      <img src="images/128x128/stand-mixer.png" id="stand-mixer"/>
-      <img src="images/128x128/washing-machine.png" id="washing-machine"/>
-      <!-- dishwasher -->
-      <img src="images/128x128/vacuum-cleaner.png" id="vacuum-cleaner"/>
-      <img src="images/128x128/television.png" id="television"/>
-      <img src="images/128x128/bulb.png" id="bulb"/>
-      <img src="images/128x128/heating.png" id="heating"/>
-    </div>
-  </footer>
+      <!-- bw missing img src="images/128x128/microwave.png" id="microwave"/-->
+      <div position="absolute" align="center">
+	<div class='battery-container'>
+	  <img class="soc" src="images/128x128/fridge.png" id="fridge-on"/>
+	  <img class="soc" src="images/128x128/fridge-bw.png" id="fridge-off"/>
+	</div>
+      </div>
+      <div position="absolute" align="center">
+	<div class='battery-container'>
+	  <img class="soc" src="images/128x128/bulb.png" id="bulb-on"/>
+	  <img class="soc" src="images/128x128/bulb-bw.png" id="bulb-off"/>
+	</div>
+      </div>
+
+      <!--img src="images/128x128/freezer.png" id="freezer-on"/>
+	  <img src="images/128x128/freezer-bw.png" id="freezer-off"/>
+	  <img src="images/128x128/toaster.png" id="toaster-on"/>
+	  <img src="images/128x128/toaster-bw.png" id="toaster-off"/>
+	  <img src="images/128x128/mixer.png" id="mixer-on"/>
+	  <img src="images/128x128/mixer-bw.png" id="mixer-off"/>
+	  <img src="images/128x128/stand-mixer.png" id="stand-mixer-on"/>
+	  <img src="images/128x128/stand-mixer-bw.png" id="stand-mixer-off"/>
+	  <img src="images/128x128/washing-machine.png" id="washing-machine-on"/>
+	  <img src="images/128x128/washing-machine-bw.png" id="washing-machine-off"/>
+	  <!-- dishwasher -->
+	  <!--img src="images/128x128/vacuum-cleaner.png" id="vacuum-cleaner-on"/>
+	      <img src="images/128x128/vacuum-cleaner-bw.png" id="vacuum-cleaner-off"/>
+	      <img src="images/128x128/television.png" id="television-on"/>
+	      <img src="images/128x128/television-bw.png" id="television-off"/-->
+
+	  <!--img src="images/128x128/heating.png" id="heating-on"/>
+	      <img src="images/128x128/heating-bw.png" id="heating-off"/-->
+</div>
+</footer>
 
 
 </body>

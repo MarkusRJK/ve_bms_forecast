@@ -11,10 +11,12 @@ var users = require('./routes/users');
 
 var app = express();
 
-const vedirect = require( 've_bms_forecast' ).VitronEnergyDevice;
+//const vedirectclass = require( 've_bms_forecast' ).VitronEnergyDevice;
+//const vedirect = new vedirectclass();
+const vedirect = require( './bms' ).BMSInstance;
 const Math = require('mathjs');
 
-var bmvterminal = require("./bmv-terminal.js");
+//var bmvterminal = require("./bmv-terminal.js");
 
 var messageId = 0;
 var clientCtr = 0;
@@ -32,9 +34,10 @@ app.use(cookieParser());
 
 function sseDemo(req, res) {
 
-    var portListener = function(newValue, oldValue, precision)
+    var portListener = function(newValue, oldValue, timeStamp, key)
     {
-	if (Math.abs(oldValue - newValue) <= precision) return;
+	console.log("app.js: received " + newValue + " " + oldValue + " " + timeStamp + " " + key);
+
 	bmvdata = vedirect.update();
 	let current   = bmvdata.batteryCurrent.formatted();
 	// let topSOC    = getBestEstimateTopSOC(current).toFixed(1);
@@ -50,13 +53,19 @@ function sseDemo(req, res) {
 	// {
 	//     vedirect.setStateOfCharge(minSOC);
 	// }
+
+	// FIXME: temp mods to alarmState for testing
+        //if (messageId < 30)
+	//   bmvdata.alarmState.value = "ON";
+        //else bmvdata.alarmState.value = "OFF";
 	let data = {
-	    'alarmState' : bmvdata.alarmState.value,
+	    'alarmState' : bmvdata.alarmState.value;
 	    'relayState' : bmvdata.relayState.value,
 	    'alarmReason': bmvdata.alarmReason.formatted(),
 	    'midVoltage' : bmvdata.midVoltage.formattedWithUnit(),
 	    'topVoltage' : bmvdata.topVoltage.formattedWithUnit(),
 	    'current'    : bmvdata.batteryCurrent.formattedWithUnit(),
+	    //'soc'        : messageId,
 	    'soc'        : bmvdata.stateOfCharge.formatted(),
 	    'timeToGo'   : bmvdata.timeToGo.formattedWithUnit()
 	};
@@ -68,9 +77,10 @@ function sseDemo(req, res) {
 	let jdata = jsonConfig = JSON.stringify(data);
 	res.write(`id: ${messageId}\n`);
 	res.write(`data: ${jdata}\n\n`);
-	//console.log(jdata);
+	console.log(jdata);
 	//res.write(`data: Test Message -- ${Date.now()}\n\n`);
 	messageId += 1;
+	//if (messageId > 100) messageId = 0;
     }
 
     //++clientCtr;
@@ -118,6 +128,7 @@ app.get('/event-stream', (req, res) => {
     });
     res.write('\n');
 
+    console.log("setting up eventstream");
     sseDemo(req.session, res);
 });
 

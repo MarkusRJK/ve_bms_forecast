@@ -7,7 +7,8 @@
 const Math = require('mathjs');
 var term = require( 'terminal-kit' ).terminal;
 // ES6: import * as vedirect from 've_bms_forecast'
-const vedirect = require( 've_bms_forecast' ).VitronEnergyDevice;
+const vedirectclass = require( 've_bms_forecast' ).VitronEnergyDevice;
+const vedirect = new vedirectclass();
 
 var fs = require('fs');
 var log4js = require('log4js');
@@ -231,7 +232,7 @@ function displayCurrentAndHistory() {
     term.moveTo(v1, h,   clearStr);
     term.moveTo(v2, h++, "%s: %s   " , bmvdata.topVoltage.shortDescr, bmvdata.topVoltage.formattedWithUnit()) ;
 
-    term.moveTo(v1, h, clearStr) ;
+    term.moveTo(v1, h, clearStr);
 
     let current = maxNullCurrentThreshold + 1;
     if (bmvdata.batteryCurrent.value !== null && bmvdata.batteryCurrent.value !== undefined)
@@ -577,12 +578,12 @@ term.on( 'key' , function( name , matches , data ) {
 	//term.moveto(20, 10);
 	// if (alarmOnOff == 0) {
 	     term.green('Alarm acknowledged');
-	     vedirect.clear_alarm();
+	     vedirect.clearAlarm();
 	//     alarmOnOff = 1;
 	// }
 	// else {
 	//     term.green('Switch alarm on');
-	//     vedirect.set_alarm();
+	//     vedirect.setAlarm();
 	//     alarmOnOff = 0;
 	// }
     }

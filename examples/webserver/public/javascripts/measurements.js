@@ -14,6 +14,8 @@ onload=function()
     let updatePageObject = function(data) {
 	// document.getElementById('Id').innerHTML = data.id;
 
+        if (data.alarmState !== undefined)
+	    document.getElementById('alarm').innerHTML = data.alarmState;
         if (data.relayState !== undefined)
 	    document.getElementById('relay').innerHTML = data.relayState;
         if (data.alarmReason !== undefined)
@@ -23,6 +25,8 @@ onload=function()
 	    document.getElementById('midVoltage').innerHTML = data.midVoltage;
         if (data.topVoltage !== undefined)
 	    document.getElementById('topVoltage').innerHTML = data.topVoltage;
+	if (data.current !== undefined)
+	   document.getElementById('current').innerHTML = data.current;
 	if (data.timeToGo !== undefined)
 	   document.getElementById('timeToGo').innerHTML = data.timeToGo;
 

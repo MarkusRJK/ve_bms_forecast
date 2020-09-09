@@ -21,6 +21,7 @@
 // - response from BMV to set command: also compare returned value
 // - make on a list so many callbacks can be called: callbacks = []; callback.push(..); callback.find(x)
 // - ensure setTimeout within class works
+// - on registration have a property that makes the first value be sent out - not if delta exceeded
 
 // FIXES needed:
 // - message times out and is removed from responseMap but then
@@ -196,8 +197,6 @@ class RegularUpdateChecksum {
 };
 
 
-var packageArrivalTime = 0;
-
 
 // \brief Creates the endianess needed by the device
 // \detail The bytes of the incoming hex string's words are
@@ -224,23 +223,9 @@ function endianSwap(hexStr, lengthInBytes)
 
 
 
-
-
-// \pre cmd must be a command without the checksum i.e. start with : and
-//      be hexadecimal
+// \pre cmd must be a command without the checksum and start
+//      hexadecimal (without ':').
 function append_checksum(cmd) {
-    logger.trace('append_checksum');
-    var command = '0' + cmd.substring(1);
-
-    const byteInHex = command.split('').map(c => parseInt(c, 16));
-    var checksum = byteInHex.reduce((total, hex, index) =>
-                    (index % 2 === 0 ? total + hex * 16 : total + hex), 0);
-    checksum = (0x55 - checksum) % 256;
-    if (checksum < 0) checksum += 256;
-    return cmd + ('0' + checksum.toString(16)).slice(-2).toUpperCase();
-}
-
-function append_checksumNew(cmd) {
     logger.trace('append_checksumNew');
     const command = '0' + cmd;
 
@@ -256,8 +241,8 @@ function append_checksumNew(cmd) {
 var sendMessageDeferTimer = null;
 
 
-setTimeout(function() 
-    {
+//setTimeout(function() 
+//    {
         //get("0xED8D"); // V - ok
         // get('0xED7D'); // 'VS'; response: -1 or FFFF
         //get('0xED8F'); // 'I' - ok
@@ -302,16 +287,16 @@ setTimeout(function()
         //get('0x0150'); // bluetooth capabilities - ERROR 01
 
         // seems one can send 2 commands that reply with 32 bit
-    } , 10100);
+//    } , 10100);
 
 ////////////////////////////////////////////////////////////////////////////////////////
 //
-// Getting a value takes in average 4seconds while many values update the device cache
+// Getting a value takes in average 4 seconds while many values update the device cache
 // every 1 second. Hence it does not make sense to get values that are sent by the
-// device.
+// device's regular updates.
 //
 
-// getUpperVoltage is better retrieved from the deviceCache via 'V'.
+// getUpperVoltage is better retrieved from the deviceCache via map['V'].
 // Retrieving any value via get() takes in avg 3800ms while all
 // updates of values are send every 1 second.
 // exports.getUpperVoltage = function()
@@ -357,23 +342,26 @@ function toEndianHexStr(value, lengthInBytes)
 
 // myInterface.on('line', function (line) {
 //     map_components();
-//     parse_serial(line);
+//     parseSerialInput(line);
 // });
 
 
+// Commands:
 const pingCommand = '1';
-const pingResponse = '5';
 const versionCommand = '3';
-const doneResponse = '1';
 const productIdCommand = '4';
 const restartCommand = '6';
 const getCommand = '7';
 const setCommand = '8';
 // 2020-05-06: async commands not working: reply is 30A00
-const asyncSetCommand = 'A'; // same as setCommand however no reply
+const asyncSetCommand = 'A'; // same as setCommand without response
+
+// Responses:
+const pingResponse = '5';
+const doneResponse = '1';
 const unknownResponse = '3';
 
-// message state
+// Message states:
 const isOK = 0;
 const isUnknownID = 1;
 const isNotSupported = 2;
@@ -385,15 +373,17 @@ class Message {
 
     constructor() {
         logger.trace('Message::constructor()');
-        this.cmdStr = null; // raw cmd string w/o frame i.e. without : and trailing \n
+        this.cmdStr  = null; // raw cmd string w/o frame i.e. without : and trailing \n
         this.command = null; // the Vitron command: 1, 3, 4, 6, 7, 8 or A
         this.address = null; // 2 byte, as string in hex format
-        this.state = null; // 1 byte, as string in hex format
-        this.value = null; // 1-4 byte, as string in hex format
-        this.id = null; // concatenation of command and endianSwapped(address)
+        this.state   = null; // 1 byte, as string in hex format
+        this.value   = null; // 1-4 byte, as string in hex format
+        this.id      = null; // concatenation of command and endianSwapped(address)
     }
 
-    // \param cmdStr the command without the leading : and trailing \n, i.e. caaaaffv..vvss
+    // \param cmdStr the command without the leading : and trailing \n, i.e. caaaammv..vvss
+    //        with c=command, aaaa=address (4 hex), mm=message state (2 hex), v...vv=value
+    //        ss=checksum
     // \return identifier
     parseIdentifier(cmdStr) {
         logger.trace('Message::parseIdentifier(' + cmdStr + ')');
@@ -445,7 +435,7 @@ class Message {
 
     // FIXME: implement parseValue in Response and Command where response usually has a value
     //        but command only for setCommand...
-    // \return value swapped, converted to int ready for use
+    // \return value swapped, converted to hex ready for use
     parseValue(cmdStr) {
         logger.trace('Message::parseValue(' + cmdStr + ')');
         let value = null;
@@ -472,9 +462,9 @@ class Message {
 
         this.command = this.parseCommand(cmdStr);
         this.address = this.parseAddress(cmdStr);
-        this.state = this.parseState(cmdStr);
-        this.value = this.parseValue(cmdStr);
-        this.id = this.parseIdentifier(cmdStr);
+        this.state   = this.parseState(cmdStr);
+        this.value   = this.parseValue(cmdStr);
+        this.id      = this.parseIdentifier(cmdStr);
     }
 
     getCommand() {
@@ -527,7 +517,7 @@ class Response extends Message {
     //         or of class Command
     constructor(cmd) {
         super();
-        logger.trace('Response::constructor(...)');
+        logger.trace('Response::constructor(' + cmd + ')');
         this.cmdStr = trimLF(cmd);
         this.parse(this.cmdStr);
     }
@@ -562,7 +552,7 @@ class Response extends Message {
     isValid(cmd) {
         logger.trace('Response::isValid(' + cmd + ')');
         if (cmd.length < 3) return false;
-        const rcs = append_checksum(':' + cmd.substring(0, cmd.length - 2));
+        const rcs = append_checksum(cmd.substring(0, cmd.length - 2));
         const expectedCS = this.getChecksum(rcs);
         const actualCS = this.getChecksum(cmd);
         if (actualCS !== expectedCS)
@@ -594,6 +584,11 @@ class Response extends Message {
     }
 };
 
+
+var cmdDefaultPriority   = 0;
+var cmdDefaultMaxRetries = 3;
+var cmdCompression    = true;
+
 class Command extends Message {
 
     // \param address is a string of the form 0xzzzz in hexadecimal format
@@ -605,10 +600,8 @@ class Command extends Message {
         logger.trace('Command::constructor(' + cmd + ', ' +
                      address + ', ' + value +
                      ', ' + priority + ', ' + maxRetries + ')');
-        if (priority) this.priority = priority;
-        else this.priority = 0; // default priority
-        if (maxRetries) this.maxRetries = maxRetries;
-        else this.maxRetries = 3; // default retries
+        this.setPriority(priority);
+        this.setMaxRetries(maxRetries);
         this.cmdStr = this.createMessage(cmd, address, value);
         super.parse(this.cmdStr);
     }
@@ -668,12 +661,19 @@ class Command extends Message {
         return this.priority;
     }
 
+    // \param p in [0; 1], 1 is higher priority
     setPriority(p) {
-        this.priority = p;
+        if (p) this.priority = p;
+        else this.priority = cmdDefaultPriority;
+        this.priority = Math.min(1, this.priority);
+        this.priority = Math.max(0, this.priority);
     }
 
+    // \param mr >= 0
     setMaxRetries(mr) {
-        this.maxRetries = mr;
+        if (mr) this.maxRetries = mr;
+        else this.maxRetries = cmdDefaultMaxRetries;
+        this.maxRetries = Math.max(0, this.maxRetries);
     }
 
     // \param cmd is out of {pingCommand, versionCommand, getCommand, setCommand, asyncSetCommand}
@@ -704,7 +704,7 @@ class Command extends Message {
         //let command = ':' + cmd + eAddress + this.state + value;
         // the state (flag) of a command is always 00 for outgoing messages
         let command = cmd + eAddress + flag + value;
-        command = append_checksumNew(command).toUpperCase();
+        command = append_checksum(command).toUpperCase();
         logger.debug('message:      ' + command);
         return command;
     }
@@ -725,7 +725,7 @@ class CommandMessageQ {
         // the second message
         // e.g. set relay on, off, on, off, on, off mostly does not make
         // sense so it is enough to send the last command "off"
-        this.cmdCompression = true;
+        this.cmdCompression = cmdCompression;
     }
 
     // \param value is either true or false
@@ -792,7 +792,7 @@ class CommandMessageQ {
     //         the returned index is guaranteed in [0; this.cmdMessageQ.length]
     indexForPriority(priority) {
         let i = this.cmdMessageQ.length;
-        // FIXME: use findIndex or indexOf
+        // start the search from the end of cmdMessageQ
         while (--i > 0 && this.cmdMessageQ[i].getPriority() < priority);
         return i + 1;
     }
@@ -867,53 +867,85 @@ class CommandMessageQ {
 };
 
 
+var cmdResponseTimeoutMS = 6000;
+var serialportFile       = "/dev/serial/by-id/usb-VictronEnergy_BV_VE_Direct_cable_VE1SUT80-if00-port0";
+var doRecord             = false;
+var recordFile           = "serial-test-data.log";
+
+var readAppConfig = function()
+{
+    const file = __dirname + '/app-config.json';
+    fs.readFile(file, 'utf8', (err, data) => {
+        if (err) {
+            logger.error(`cannot read: ${file} (${err.code === 'ENOENT' ? 'does not exist' : 'is not readable'})`);
+        } else {
+            //console.log("Parse configuration (JSON format)");
+            let config = JSON.parse(data);
+            cmdDefaultPriority   = config.Commands.defaultPriority;
+            cmdDefaultMaxRetries = config.Commands.defaultMaxRetries;
+            cmdCompression       = config.Commands.compression;
+            cmdResponseTimeoutMS = config.Commands.responseTimeoutInMS;
+
+            serialportFile       = config.Device.serialportFile;
+            doRecord             = config.Device.doRecord;
+            recordFile           = config.Device.recordFile;
+        }
+    });
+}
+
+readAppConfig();
+
+
 class ReceiverTransmitter {
     constructor() {
-        this.isRecording = false;
         this.isOperational = false;
         this.sendMessageDeferTimer = null;
         this.deferalTimeInMs = 1000;
         // measured max response time approx. 3984ms
-        this.cmdResponseTimeoutMS = 6000; // milliseconds
+        this.cmdResponseTimeoutMS = cmdResponseTimeoutMS; // milliseconds
         this.checksum = new RegularUpdateChecksum();
         this.responseMap = {};
         this.cmdQ = new CommandMessageQ();
         this.port = null;
-        this.open('/dev/serial/by-id/usb-VictronEnergy_BV_VE_Direct_cable_VE1SUT80-if00-port0');
+        this.open(serialportFile);
         this.maxResponseTime = 0;
-        this.record_file = fs.createWriteStream(__dirname + '/serial-test-data.log', {flags: 'w'});
-	this.on = null;
+        this.isRecording = doRecord;
+        if (this.isRecording)
+            this.recordFile = fs.createWriteStream(__dirname + '/' + recordFile, {flags: 'w'});
+        else this.recordFile = null;
+        this.on = null;
+        this.packageArrivalTime = 0;
     }
 
-    updateCacheObject(obj, doLog) {
-	let changeObj = null;
+    updateCacheObject(key, obj) {
+        let changeObj = null;
+        //  value received by serial parser ==> newValue != null
         if (obj.newValue != null && obj.value !== obj.newValue)
         {
+            //console.log("updating " + key + " " + obj.value + " => " + obj.newValue);
             let oldValue = obj.value;
             obj.value = obj.newValue; // accept new values
             // send event to listeners with values
             // on() means if update applied,
 
             if (obj.on !== null
-		&& Math.abs(oldValue - obj.newValue) * obj.nativeToUnitFactor >= obj.delta)
+                && Math.abs(oldValue - obj.newValue) * obj.nativeToUnitFactor >= obj.delta)
             {
-		changeObj = obj;
-                // FIXME: sort out packageArrivalTime
-		// FIXME: use full obj as first parameter
-                obj.on(obj.newValue, oldValue, obj.precision);
+                changeObj = obj;
+                obj.on(obj.newValue, oldValue, this.packageArrivalTime, key);
             }
         }
         obj.newValue = null;
         return changeObj;
     }
 
-    updateValuesAndValueListeners(doLog) {
+    updateValuesAndValueListeners() {
         logger.trace('ReceiverTransmitter::updateValuesAndValueListeners');
         let changedObjects = [];
-        for (const[key, obj] of Object.entries(map)) {
-            changedObjects.push(this.updateCacheObject(obj, doLog));
+        for (const[key, obj] of Object.entries(bmvdata)) {
+            changedObjects.push(this.updateCacheObject(key, obj));
         }
-        if (this.on !== null) this.on(changeObjects, packageArrivalTime);
+        if (this.on !== null) this.on(changeObjects, this.packageArrivalTime);
     }
 
     discardValues() {
@@ -929,7 +961,7 @@ class ReceiverTransmitter {
     registerListener(listener)
     {
         logger.trace('ReceiverTransmitter::registerListener');
-	this.on = listener;
+        this.on = listener;
     }
 
     evaluate(response) {
@@ -1001,9 +1033,9 @@ class ReceiverTransmitter {
             this.isOperational = true;
             if (this.isRecording)
             {
-                this.record_file.write(line + '\r\n');
+                this.recordFile.write(line + '\r\n');
             }
-            this.parse_serial(line);
+            this.parseSerialInput(line);
         }.bind(this));
     }
 
@@ -1013,9 +1045,11 @@ class ReceiverTransmitter {
         this.port.close();
     }
 
-    parse_serial(line) {
-        logger.trace('ReceiverTransmitter::parse_serial');
+    parseSerialInput(line) {
+        logger.trace('ReceiverTransmitter::parseSerialInput');
+        // a line contains a key value pair separated by tab:
         let res = line.split('\t');
+        // res[0] is the key, res[1] the value
         if (!res[0] || res[0] === '')
         {
             if (res[1] && res[1].length > 1 && res[1].substring(1).split(':'))
@@ -1048,6 +1082,7 @@ class ReceiverTransmitter {
             cs = cs % 256;
             if (cs === 0) // valid checksum for periodic frames
             {
+                //console.log("updateValuesAndValueListeners");
                 this.updateValuesAndValueListeners(false);
             }
             else // checksum invalid
@@ -1068,7 +1103,7 @@ class ReceiverTransmitter {
                     logger.warn(prefix + isStr + expStr);
                 }
             }
-            packageArrivalTime = 0;
+            this.packageArrivalTime = 0;
             this.checksum.reset(); // checksum field read => reset checksum
             // frame always finishes before another frame
             // or before a command response arrives.
@@ -1095,15 +1130,15 @@ class ReceiverTransmitter {
         }
         else
         {
+            if (res[0] === undefined) return;
             // a line consist of:
             // field name + tab + field value + return
-            // the "return is consumed outside parse_serial by the readline command
+            // the "return is consumed outside parseSerialInput by the readline command
             // the "tab" is consumed by the split command at the top of this function
             this.checksum.update(line);
-            if (res[0] === undefined) return;
-            if (packageArrivalTime === 0) packageArrivalTime = new Date();
+            if (this.packageArrivalTime === 0) this.packageArrivalTime = Date.now();
             if (res[0] in map && map[res[0]] !== undefined) map[res[0]].newValue = res[1];
-            else logger.warn('parse_serial: ' + res[0]
+            else logger.warn('parseSerialInput: ' + res[0]
                              + ' is not registered and has value ' + res[1]);
         }
     };
@@ -1188,7 +1223,7 @@ class ReceiverTransmitter {
     restart() {
         logger.trace('ReceiverTransmitter::restart');
         logger.debug('ReceiverTransmitter::restart'); //FIXME: temporary
-        let command = append_checksumNew(restartCommand);
+        let command = append_checksum(restartCommand);
         this.port.write(this.package(command)); // the command is fixed :64F\n
     }
 
@@ -1259,7 +1294,7 @@ class ReceiverTransmitter {
             let value = response.getValue();
             if (commandId === productIdCommand) {
                 bmvdata.productId.newValue = value;
-                this.updateCacheObject(bmvdata.productId, true); // ignore returned object
+                this.updateCacheObject('productId', bmvdata.productId); // ignore returned object
                 logger.debug('Product Id response: '
                              + bmvdata.productId.shortDescr + ' '
                              + bmvdata.productId.formatted() + ' - cache updated');
@@ -1267,7 +1302,7 @@ class ReceiverTransmitter {
             else { // commandId === versionCommand
                 const releaseCandidate = value.charAt(0);
                 bmvdata.version.newValue = value.substring(1);
-                this.updateCacheObject(bmvdata.version, true); // ignore returned object
+                this.updateCacheObject('version', bmvdata.version); // ignore returned object
                 logger.debug('Ping/Version response: '
                              + bmvdata.version.shortDescr + ' ' + bmvdata.version.formatted()
                              + ' release candidate ' + releaseCandidate + ' - cache updated');
@@ -1287,7 +1322,9 @@ class ReceiverTransmitter {
                     // TODO: add sentTime, receivedTime fields to each object
                     addressCache[address].newValue = addressCache[address].fromHexStr(response.getValue());
                     logger.debug('response for ' + address + ': updating cache');
-                    this.updateCacheObject(addressCache[address], true); // ignore returned object
+                    // FIXME: addressCache must point to the bmvdata keys!!!
+                    // i.e. here updateCacheObject(bmvdata[addressCache[address]]...
+                    this.updateCacheObject('FIXME', addressCache[address]); // ignore returned object
                 }
                 else {
                     logger.warn(address + ' is not in addressCache');
@@ -1348,11 +1385,13 @@ class VitronEnergyDevice {
 
     constructor() {
         logger.trace('VitronEnergyDevice::constructor');
-        // set isRecording true to record the incoming data stream to record_file
+        // set isRecording true to record the incoming data stream to recordFile
         this.on = null;
         if(! VitronEnergyDevice.instance){
             this.rxtx = new ReceiverTransmitter();
             VitronEnergyDevice.instance = this;
+            // FIXME: object freeze does not work as it should
+            Object.freeze(VitronEnergyDevice);
         }
         return VitronEnergyDevice.instance;
     }
@@ -1797,12 +1836,12 @@ class VitronEnergyDevice {
             this.set('0x034E', '01', priority, force);
     }
 
-    set_alarm() {
+    setAlarm() {
         logger.trace('VitronEnergyDevice::set alarm');
         this.set('0xEEFC', '01');
     }
     
-    clear_alarm() {
+    clearAlarm() {
         logger.trace('VitronEnergyDevice::clear alarm');
         //this.set('0xEEFC', '00');
         this.set('0x031F', '00');
@@ -1843,19 +1882,43 @@ class VitronEnergyDevice {
     
     // \brief Set or remove a listener (one listener per property)
     // \details Set null to remove the listener.
-    //        If property is 'Checksum' then a map of changed
+    //        If property is 'ChangeList' then a map of changed
     //        values is handed over to listener.
+    // \param property is one property out of the keys of bmvdata
+    //        (i.e. batteryCurrent, alarmState, relayState, ...)
+    //        OR the property is ChangeList
+    // \param listener is a function with the following interface
+    //        listener = function(newValueFormatted, // i.e. rounded to precision and "scaled to SI unit"
+    //                            oldValueFormatted, // i.e. rounded to precision and "scaled to SI unit"
+    //                            valueReceivedTime, 
+    //                            property)            // i.e. reference to bmvdata[property]
+    //        newValueFormatted and oldValueFormatted are without units so calculations
+    //        can be done easily. The string property allows to address the entire object.
+    //        Access to the object gives access to the unit, precision, delta, short description, etc.
+    // \note  a function must expect the values in this order, though the function
+    //        may not provide arguments for the last entities, e.g.
+    //        function(newValueFormatted, oldValueFormatted) can be registered.
+    //        newValueFormatted and oldValueFormatted may differ from the object's
+    //        values.
+    // \see   device_cache.js: function register(.) property formatted
     registerListener(property, listener)
     {
-        logger.trace('VitronEnergyDevice::registerListener');
+        logger.trace('VitronEnergyDevice::registerListener(' + property + ')');
         if (property === 'ChangeList') this.rxtx.registerListener(listener);
-        else bmvdata[property].on = listener;
+        else if (property in bmvdata) {
+            bmvdata[property].on = listener;
+            // send current value at registration as baseline
+            listener(bmvdata[property].value,
+                     bmvdata[property].value, // first value: newValue = value
+                     Date.now(),
+                     property);
+        }
     }
     
     hasListener(property)
     {
         logger.trace('VitronEnergyDevice::hasListener');
-        if (property === 'Checksum') return this.on !== null;
+        if (property === 'ChangeList') return this.rxtx.on !== null;
         else return bmvdata[property].on !== null;
     }
 
@@ -1868,5 +1931,7 @@ class VitronEnergyDevice {
 // ES6:
 // const instance = new VitronEnergyDevice();
 // export default instance;
-module.exports.VitronEnergyDevice = new VitronEnergyDevice();
-Object.freeze(exports.VitronEnergyDevice);
+module.exports.VitronEnergyDevice = VitronEnergyDevice;
+// add module.exports.VitronEnergyDevice.instance and then freeze the object
+// FIXME: make freeze work again!!!
+//Object.freeze(exports.VitronEnergyDevice);

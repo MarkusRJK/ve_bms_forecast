@@ -1,0 +1,17 @@
+{
+    "Device":
+    {
+	"doRecord"      : false,
+	"recordFile"    : "serial-test-data.log",
+	"serialportFile": "/dev/serial/by-id/usb-VictronEnergy_BV_VE_Direct_cable_VE1SUT80-if00-port0"
+    }
+
+    "Commands":
+    {
+	"defaultPriority"    : 0,
+	"defaultMaxRetries"  : 3,
+	"compression"        : true,
+	"responseTimeoutInMS": 6000
+    }
+
+}
