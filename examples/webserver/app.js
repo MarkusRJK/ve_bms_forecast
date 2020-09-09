@@ -16,7 +16,7 @@ var app = express();
 const vedirect = require( './bms' ).BMSInstance;
 const Math = require('mathjs');
 
-//var bmvterminal = require("./bmv-terminal.js");
+var bmvterminal = require("./bmv-terminal.js");
 
 var messageId = 0;
 var clientCtr = 0;
@@ -36,7 +36,7 @@ function sseDemo(req, res) {
 
     var portListener = function(newValue, oldValue, timeStamp, key)
     {
-	console.log("app.js: received " + newValue + " " + oldValue + " " + timeStamp + " " + key);
+	//console.log("app.js: received " + newValue + " " + oldValue + " " + timeStamp + " " + key);
 
 	bmvdata = vedirect.update();
 	let current   = bmvdata.batteryCurrent.formatted();
@@ -59,7 +59,7 @@ function sseDemo(req, res) {
 	//   bmvdata.alarmState.value = "ON";
         //else bmvdata.alarmState.value = "OFF";
 	let data = {
-	    'alarmState' : bmvdata.alarmState.value;
+	    'alarmState' : bmvdata.alarmState.value,
 	    'relayState' : bmvdata.relayState.value,
 	    'alarmReason': bmvdata.alarmReason.formatted(),
 	    'midVoltage' : bmvdata.midVoltage.formattedWithUnit(),
@@ -77,7 +77,7 @@ function sseDemo(req, res) {
 	let jdata = jsonConfig = JSON.stringify(data);
 	res.write(`id: ${messageId}\n`);
 	res.write(`data: ${jdata}\n\n`);
-	console.log(jdata);
+	//console.log(jdata);
 	//res.write(`data: Test Message -- ${Date.now()}\n\n`);
 	messageId += 1;
 	//if (messageId > 100) messageId = 0;
