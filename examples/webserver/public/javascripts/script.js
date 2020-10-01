@@ -1,11 +1,15 @@
+var alarmTimer = null;
 
 onload=function()
 {
-
     let imgPath = "images/128x128";
 
-    const setSOC = function(soc, batteryNo) {
-        if (soc === undefined || soc < 0 || soc > 100) return;
+    const setSOC = function(socIn, batteryNo) {
+	console.log("soc: " + socIn);
+	let soc = parseFloat(socIn);
+	if (isNaN(soc)) return;
+	// drawing imgElement with height 0 yields in a filled red column
+        if (soc < 0 || soc > 100) return;
 	let gImgElement = 'gBattery' + batteryNo;
 	let oImgElement = 'oBattery' + batteryNo;
 	let rImgElement = 'rBattery' + batteryNo;
@@ -21,7 +25,8 @@ onload=function()
 
 	let height = (0.7 * soc).toFixed(0); // scale 
 	let top = 88 - height;
-	document.getElementById(imgElement).setAttribute("style",
+	if (height != 0) 
+	    document.getElementById(imgElement).setAttribute("style",
 		"display:block;height:" + height + "%;top:" + top + "%");
 	document.getElementById(htmlElement).innerHTML = soc.toFixed(0) + "%";
     }
@@ -90,35 +95,20 @@ onload=function()
         if (data.alarmState !== undefined)
 	{
 	    if (data.alarmState === 'ON') {
-		console.log("alarm is on");
-		playSound('sounds/high_priority_alarm.wav');
+		alarmTimer = setTimeout(function() {
+		    playSound('sounds/high_priority_alarm.wav');
+		}, 10000);
               	document.getElementById('alarm-on').setAttribute("style", "display:block");
               	document.getElementById('alarm-off').setAttribute("style", "display:none");
             } else {
-		console.log("alarm is off");
+		clearTimeout(alarmTimer);
               	document.getElementById('alarm-off').setAttribute("style", "display:block");
               	document.getElementById('alarm-on').setAttribute("style", "display:none");
 	    }
 	} else console("alarmstate not defined");
-        // if (data.relayState !== undefined)
-	//     document.getElementById('relay').innerHTML = data.relayState;
-        // if (data.alarmReason !== undefined)
-	//     //if (alarmReason in data)
-	//     document.getElementById('alarmReason').innerHTML = data.alarmReason;
-        // if (data.midVoltage !== undefined)
-	//     document.getElementById('midVoltage').innerHTML = data.midVoltage;
-        // if (data.topVoltage !== undefined)
-	//     document.getElementById('topVoltage').innerHTML = data.topVoltage;
-        // if (data.current !== undefined) {
-	//     document.getElementById('current').innerHTML = data.current;
-	//     if (data.current > 10)
-	// 	document.getElementById('bulb').src = "images/light-bulb-bw.png";
-	// }
-	//if (data.timeToGo !== undefined)
-	//    document.getElementById('timeToGo').innerHTML = data.timeToGo;
 
-	setSOC(data.soc, 1);
-	setSOC(data.soc, 2);
+	setSOC(data.lowerSOC, 1);
+	setSOC(data.upperSOC, 2);
     }
     
     const sseSource = new EventSource('/event-stream');
@@ -133,18 +123,15 @@ onload=function()
 	switchDevices({});
     });
 
-    let initialData = {};
-    initialData.soc=50;
-    initialData.alarmState = "OFF";
+    // let initialData = {};
+    // initialData.soc=50;
+    // initialData.alarmState = "OFF";
 
-    updatePageObject(initialData);
-    initialData.alarmState = "ON";
+    // updatePageObject(initialData);
+    // initialData.alarmState = "ON";
     //setInterval(updatePageObject(initialData), 5000);
 
-    setSOC(50, 1);
-    setSOC(50, 2);
     switchDevices({});
-
 };
 
 // https://stackoverflow.com/questions/10105063/how-to-play-a-notification-sound-on-websites

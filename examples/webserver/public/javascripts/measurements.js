@@ -2,9 +2,11 @@
 onload=function()
 {
     const setSOC = function(soc, batteryNo) {
-        if (soc === undefined || soc < 0 || soc > 100) return;
+        if (soc === undefined) return;
+	let s = parseFloat(soc);
+        if (isNaN(s) || s < 0 || s > 100) return;
 	let htmlElement = 'soc' + batteryNo;
-	document.getElementById(htmlElement).innerHTML = soc.toFixed(0) + "%";
+	document.getElementById(htmlElement).innerHTML = s.toFixed(0) + "%";
     }
 
     const switchDevices = function(appliances) {
@@ -30,8 +32,8 @@ onload=function()
 	if (data.timeToGo !== undefined)
 	   document.getElementById('timeToGo').innerHTML = data.timeToGo;
 
-	setSOC(data.soc, 1);
-	setSOC(data.soc, 2);
+	setSOC(data.lowerSOC, 1);
+	setSOC(data.upperSOC, 2);
     }
     
     const sseSource = new EventSource('/event-stream');

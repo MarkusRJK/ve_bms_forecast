@@ -16,7 +16,8 @@ var app = express();
 const vedirect = require( './bms' ).BMSInstance;
 const Math = require('mathjs');
 
-var bmvterminal = require("./bmv-terminal.js");
+// FIXME: terminal does not work anymore in parallel to webserver
+//var bmvterminal = require("./bmv-terminal.js");
 
 var messageId = 0;
 var clientCtr = 0;
@@ -36,51 +37,57 @@ function sseDemo(req, res) {
 
     var portListener = function(newValue, oldValue, timeStamp, key)
     {
-	//console.log("app.js: received " + newValue + " " + oldValue + " " + timeStamp + " " + key);
+        //console.log("app.js: received " + newValue + " " + oldValue + " " + timeStamp + " " + key);
 
-	bmvdata = vedirect.update();
-	let current   = bmvdata.batteryCurrent.formatted();
-	// let topSOC    = getBestEstimateTopSOC(current).toFixed(1);
-	// let bottomSOC = getBestEstimateBottomSOC(current).toFixed(1);
+        let bmvdata = vedirect.update();
+        let current   = bmvdata.batteryCurrent.formatted();
+        // let topSOC    = getBestEstimateTopSOC(current).toFixed(1);
+        // let bottomSOC = getBestEstimateBottomSOC(current).toFixed(1);
 
-	// let minSOC;
-	// if (topSOC && bottomSOC)
-	//     minSOC = Math.min(topSOC, bottomSOC);
-	// if ((isNaN(bmvdata.stateOfCharge.value)) || bmvdata.stateOfCharge.value * 0.1 > 100
-	//     || bmvdata.stateOfCharge.value * 0.1 < 0)
-	//     if (minSOC) vedirect.setStateOfCharge(minSOC);
-	// if (minSOC && Math.abs(bmvdata.stateOfCharge.value * 0.1 - minSOC) >=1)
-	// {
-	//     vedirect.setStateOfCharge(minSOC);
-	// }
+        // let minSOC;
+        // if (topSOC && bottomSOC)
+        //     minSOC = Math.min(topSOC, bottomSOC);
+        // if ((isNaN(bmvdata.stateOfCharge.value)) || bmvdata.stateOfCharge.value * 0.1 > 100
+        //     || bmvdata.stateOfCharge.value * 0.1 < 0)
+        //     if (minSOC) vedirect.setStateOfCharge(minSOC);
+        // if (minSOC && Math.abs(bmvdata.stateOfCharge.value * 0.1 - minSOC) >=1)
+        // {
+        //     vedirect.setStateOfCharge(minSOC);
+        // }
 
-	// FIXME: temp mods to alarmState for testing
+        // FIXME: temp mods to alarmState for testing
         //if (messageId < 30)
-	//   bmvdata.alarmState.value = "ON";
+        //   bmvdata.alarmState.value = "ON";
         //else bmvdata.alarmState.value = "OFF";
-	let data = {
-	    'alarmState' : bmvdata.alarmState.value,
-	    'relayState' : bmvdata.relayState.value,
-	    'alarmReason': bmvdata.alarmReason.formatted(),
-	    'midVoltage' : bmvdata.midVoltage.formattedWithUnit(),
-	    'topVoltage' : bmvdata.topVoltage.formattedWithUnit(),
-	    'current'    : bmvdata.batteryCurrent.formattedWithUnit(),
-	    //'soc'        : messageId,
-	    'soc'        : bmvdata.stateOfCharge.formatted(),
-	    'timeToGo'   : bmvdata.timeToGo.formattedWithUnit()
-	};
-	// for testing:
-	// let data = {
-	//     'id' : messageId,
-	//     'SOC': '100%'
-	// };
-	let jdata = jsonConfig = JSON.stringify(data);
-	res.write(`id: ${messageId}\n`);
-	res.write(`data: ${jdata}\n\n`);
-	//console.log(jdata);
-	//res.write(`data: Test Message -- ${Date.now()}\n\n`);
-	messageId += 1;
-	//if (messageId > 100) messageId = 0;
+
+        // lowerSOC, upperSOC unformatted without units
+        let socL = vedirect.getLowerSOC();
+        let socU = vedirect.getUpperSOC();
+        let data = {
+            'alarmState' : bmvdata.alarmState.value,
+            'relayState' : bmvdata.relayState.value,
+            'alarmReason': bmvdata.alarmReason.formatted(),
+            'midVoltage' : bmvdata.midVoltage.formattedWithUnit(),
+            'topVoltage' : bmvdata.topVoltage.formattedWithUnit(),
+            'current'    : bmvdata.batteryCurrent.formattedWithUnit(),
+            //'soc'        : messageId,
+            'soc'        : bmvdata.stateOfCharge.formatted(),
+            'lowerSOC'   : socL,
+            'upperSOC'   : socU,
+            'timeToGo'   : bmvdata.timeToGo.formattedWithUnit()
+        };
+        // for testing:
+        // let data = {
+        //     'id' : messageId,
+        //     'SOC': '100%'
+        // };
+        let jdata = JSON.stringify(data);
+        res.write(`id: ${messageId}\n`);
+        res.write(`data: ${jdata}\n\n`);
+        //console.log(jdata);
+        //res.write(`data: Test Message -- ${Date.now()}\n\n`);
+        messageId += 1;
+        //if (messageId > 100) messageId = 0;
     }
 
     //++clientCtr;
@@ -98,11 +105,11 @@ function sseDemo(req, res) {
     
     // req.on('close', () => {
     //     //clearInterval(intervalId);
-    // 	// deregister and close port?
-    // 	if (--clientCtr === 0) {
-    // 	    console.log("closing even source");
-    // 	    vedirect.close();
-    // 	}
+    //  // deregister and close port?
+    //  if (--clientCtr === 0) {
+    //      console.log("closing even source");
+    //      vedirect.close();
+    //  }
     // });
 }
 

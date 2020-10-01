@@ -16,12 +16,8 @@
 // - first parse: parse until checksum ok then create objects from it for cache - only then do the up/download of config
 // - further parse: replace callback function by final parse function to do updates
 // - register function has switch statement to create each object after each other (only those appearing in update packet)
-// - add a on function for CHECKSUM that sends collection of all changes
-// - iterate over bmvdata rather than map as bmvdata shall have all entries
 // - response from BMV to set command: also compare returned value
-// - make on a list so many callbacks can be called: callbacks = []; callback.push(..); callback.find(x)
 // - ensure setTimeout within class works
-// - on registration have a property that makes the first value be sent out - not if delta exceeded
 
 // FIXES needed:
 // - message times out and is removed from responseMap but then
@@ -871,6 +867,7 @@ var cmdResponseTimeoutMS = 6000;
 var serialportFile       = "/dev/serial/by-id/usb-VictronEnergy_BV_VE_Direct_cable_VE1SUT80-if00-port0";
 var doRecord             = false;
 var recordFile           = "serial-test-data.log";
+var isConfigured         = false;
 
 var readAppConfig = function()
 {
@@ -879,7 +876,7 @@ var readAppConfig = function()
         if (err) {
             logger.error(`cannot read: ${file} (${err.code === 'ENOENT' ? 'does not exist' : 'is not readable'})`);
         } else {
-            //console.log("Parse configuration (JSON format)");
+            console.log("Parse configuration (JSON format)");
             let config = JSON.parse(data);
             cmdDefaultPriority   = config.Commands.defaultPriority;
             cmdDefaultMaxRetries = config.Commands.defaultMaxRetries;
@@ -890,6 +887,7 @@ var readAppConfig = function()
             doRecord             = config.Device.doRecord;
             recordFile           = config.Device.recordFile;
         }
+	isConfigured = true;
     });
 }
 
@@ -913,7 +911,7 @@ class ReceiverTransmitter {
         if (this.isRecording)
             this.recordFile = fs.createWriteStream(__dirname + '/' + recordFile, {flags: 'w'});
         else this.recordFile = null;
-        this.on = null;
+        this.on = [];
         this.packageArrivalTime = 0;
     }
 
@@ -928,11 +926,12 @@ class ReceiverTransmitter {
             // send event to listeners with values
             // on() means if update applied,
 
-            if (obj.on !== null
+            if (obj.on.length > 0
                 && Math.abs(oldValue - obj.newValue) * obj.nativeToUnitFactor >= obj.delta)
             {
                 changeObj = obj;
-                obj.on(obj.newValue, oldValue, this.packageArrivalTime, key);
+		for (let i = 0; i < obj.on.length; ++i)
+		    obj.on[i](obj.newValue, oldValue, this.packageArrivalTime, key);
             }
         }
         obj.newValue = null;
@@ -942,10 +941,13 @@ class ReceiverTransmitter {
     updateValuesAndValueListeners() {
         logger.trace('ReceiverTransmitter::updateValuesAndValueListeners');
         let changedObjects = [];
+	// FIXME: Object.entries(map)
         for (const[key, obj] of Object.entries(bmvdata)) {
             changedObjects.push(this.updateCacheObject(key, obj));
         }
-        if (this.on !== null) this.on(changeObjects, this.packageArrivalTime);
+        if (this.on.length > 0)
+	    for (let i = 0; i < this.on.length; ++i)
+		this.on[i](changeObjects, this.packageArrivalTime);
     }
 
     discardValues() {
@@ -958,10 +960,26 @@ class ReceiverTransmitter {
 
     // \brief Set or remove a listener for the list of changes 
     // \details Set null to remove the listener.
+    // \note the same listener is allowed to appear several times in the array
+    //       whether it makes sense or not.
     registerListener(listener)
     {
         logger.trace('ReceiverTransmitter::registerListener');
-        this.on = listener;
+        this.on.push(listener);
+    }
+
+    findListenerIndex(listener) {
+	for (let i = 0; i < this.on.length; ++i)
+	{
+	    if (this.on[i] === listener) return i;
+	}
+    }
+
+    deregisterListener(listener)
+    {
+        logger.trace('ReceiverTransmitter::deregisterListener');
+	let i = findListenerIndex(listener);
+	delete this.on[i];
     }
 
     evaluate(response) {
@@ -1026,6 +1044,8 @@ class ReceiverTransmitter {
 
     open(ve_port) {
         logger.trace('ReceiverTransmitter::open(.)');
+	// FIXME: 
+	// if (! isConfigured ) ...
         this.port =  new serialport(ve_port, {
             baudrate: 19200,
             parser: serialport.parsers.readline('\r\n', 'binary')});
@@ -1385,8 +1405,6 @@ class VitronEnergyDevice {
 
     constructor() {
         logger.trace('VitronEnergyDevice::constructor');
-        // set isRecording true to record the incoming data stream to recordFile
-        this.on = null;
         if(! VitronEnergyDevice.instance){
             this.rxtx = new ReceiverTransmitter();
             VitronEnergyDevice.instance = this;
@@ -1456,7 +1474,7 @@ class VitronEnergyDevice {
 
     getStateOfCharge()
     {
-        logger.trace('VitronEnergyDevice::getStateOfCharge: ' + address);
+        logger.trace('VitronEnergyDevice::getStateOfCharge');
         this.get('0x0FFF');
     }
 
@@ -1903,10 +1921,11 @@ class VitronEnergyDevice {
     // \see   device_cache.js: function register(.) property formatted
     registerListener(property, listener)
     {
+	if (! property || ! listener) return;
         logger.trace('VitronEnergyDevice::registerListener(' + property + ')');
         if (property === 'ChangeList') this.rxtx.registerListener(listener);
         else if (property in bmvdata) {
-            bmvdata[property].on = listener;
+            bmvdata[property].on.push(listener);
             // send current value at registration as baseline
             listener(bmvdata[property].value,
                      bmvdata[property].value, // first value: newValue = value
@@ -1915,11 +1934,29 @@ class VitronEnergyDevice {
         }
     }
     
-    hasListener(property)
+    findListenerIndex(property, listener) {
+	for (let i = 0; i < bmvdata[property].on.length; ++i)
+	{
+	    if (bmvdata[property].on[i] === listener) return i;
+	}
+    }
+
+    deregisterListener(property, listener)
+    {
+	if (! property || ! listener) return;
+        logger.trace('VitronEnergyDevice::deregisterListener(' + property + ')');
+        if (property === 'ChangeList') this.rxtx.deregisterListener(listener);
+        else if (property in bmvdata) {
+	    let i = findListenerIndex(property, listener);
+	    delete bmvdata[property].on[i];
+        }
+    }
+    
+    hasListeners(property)
     {
         logger.trace('VitronEnergyDevice::hasListener');
-        if (property === 'ChangeList') return this.rxtx.on !== null;
-        else return bmvdata[property].on !== null;
+        if (property === 'ChangeList') return this.rxtx.on.length > 0;
+        else return (bmvdata[property].on.length > 0);
     }
 
     update() {
@@ -1935,3 +1972,5 @@ module.exports.VitronEnergyDevice = VitronEnergyDevice;
 // add module.exports.VitronEnergyDevice.instance and then freeze the object
 // FIXME: make freeze work again!!!
 //Object.freeze(exports.VitronEnergyDevice);
+
+

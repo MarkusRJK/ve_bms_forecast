@@ -532,7 +532,7 @@ var alarmOnOff = 0;
 
 term.grabInput( { mouse: 'button' } ) ;
 
-term.on( 'key' , function( name , matches , data ) {
+term.on( 'key' , ( name , matches , data ) => {
     logger.debug( "'key' event:" + name + "; matches: " + matches);
     term.clear();
 

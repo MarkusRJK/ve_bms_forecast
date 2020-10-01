@@ -244,8 +244,7 @@ function register(nativeToUnitFactor, units, shortDescr, options) {
     obj.description = ""; // default
     obj.precision = 0.01; // default precision -2 digits after dot
     obj.delta = 0.01; // default delta; if delta exceeded a change propagated via on()
-    // TODO: obj.on = []; and implement addListener, deleteListener
-    obj.on = null;
+    obj.on = [];
     // if values are read from register instead of the frequent value
     // updates, the values are in hexadecimal string format and may
     // have a different factor that needs to be applied to convert
@@ -292,7 +291,6 @@ function register(nativeToUnitFactor, units, shortDescr, options) {
 function map_components() {
     logger.trace("Registering");
     // component:  your given name
-    // key:        string identifier that comes with the value sent by BMV
     // n2UF:       nativeToUnitFactor (output value = n2UF * BMV_value)
     // units:      Ampere, Volts etc. the units must fit the n2UF 
     // shortDescr: used as label for the value
@@ -301,7 +299,9 @@ function map_components() {
     //                        zero:      0; round to integer
     //                        positive: +n; round to the n-th digit left from decimal separator
     //                        default:  -2; round to 2 digits right to the decimal separator
-    //      component,                      key     n2UF,  units,  shortDescr,     options
+    //
+    // Each registration line is as follows:
+    // bmvdata.<component> = register(<n2UF>, <units>, <shortDescr>, <options>);
 
     // Monitored values:
     // BMV600, BMV700, Phoenix Inverter
@@ -310,6 +310,7 @@ function map_components() {
     {
 	return getAlarmText(this.value);
     }});
+    // the key of the map is a string identifier that comes with the value sent by BMV
     map['AR']                   = bmvdata.alarmReason;
     
     // BMV600, BMV700, MPPT - Type Sn16; Unit: 0.1A!!!
