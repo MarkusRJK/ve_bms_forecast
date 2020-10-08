@@ -1,4 +1,9 @@
 {
+    "capacityByTemp": {
+	"celcius": [0, 25, 40],
+	"percent": [86, 100, 103]
+    },
+    
     "floatcharge": {
 	"current": {
 	    "hours"  : [0.0, 7.27, 8.0,  8.54, 9.9,  12.0, 14.0, 16.0,    18.55,   32.0],

@@ -7,9 +7,10 @@ onload=function()
     const setSOC = function(socIn, batteryNo) {
 	console.log("soc: " + socIn);
 	let soc = parseFloat(socIn);
-	if (isNaN(soc)) return;
+	if (isNaN(soc)) soc = 0;
 	// drawing imgElement with height 0 yields in a filled red column
-        if (soc < 0 || soc > 100) return;
+	if (soc < 0) soc = 0;
+	if (soc > 100) soc = 100;
 	let gImgElement = 'gBattery' + batteryNo;
 	let oImgElement = 'oBattery' + batteryNo;
 	let rImgElement = 'rBattery' + batteryNo;

@@ -1963,6 +1963,11 @@ class VitronEnergyDevice {
         logger.trace('VitronEnergyDevice::update');
         return bmvdata;
     }
+
+    createObject(nativeToUnitFactor, units, shortDescr, options) {
+        logger.trace('VitronEnergyDevice::register');
+        return deviceCache.createObject(nativeToUnitFactor, units, shortDescr, options);
+    }
 }
 
 // ES6:
