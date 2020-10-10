@@ -1,4 +1,6 @@
 var alarmTimer = null;
+const sseSource = new EventSource('/event-stream');
+
 
 onload=function()
 {
@@ -112,7 +114,6 @@ onload=function()
 	setSOC(data.upperSOC, 2);
     }
     
-    const sseSource = new EventSource('/event-stream');
     sseSource.addEventListener('message', (e) => {
         const jdata = e.data;
         const data = JSON.parse(jdata)
@@ -149,3 +150,22 @@ onunload=function()
     console.log("unload");
     sseSource.close();
 }
+
+
+const button = document.getElementById('solarMainsSwitch');
+button.addEventListener('click', function(e) {
+    console.log('button was clicked');
+
+    fetch('/clicked', {method: 'POST'})
+	.then(function(response) {
+	    if(response.ok) {
+		console.log('click received by browser');
+		return;
+	    }
+	    throw new Error('Request failed.');
+	})
+	.catch(function(error) {
+	    console.log(error);
+	});
+});
+

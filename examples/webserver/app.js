@@ -1,4 +1,4 @@
-var express = require('express'); // const?
+const express = require('express');
 var path = require('path');
 var favicon = require('static-favicon');
 var logger = require('morgan');
@@ -9,12 +9,13 @@ var bodyParser = require('body-parser');
 var routes = require('./routes/index');
 var users = require('./routes/users');
 
-var app = express();
+const app = express();
 
 //const vedirectclass = require( 've_bms_forecast' ).VitronEnergyDevice;
 //const vedirect = new vedirectclass();
 const vedirect = require( './bms' ).BMSInstance;
 const Math = require('mathjs');
+const bmvdata = vedirect.update();
 
 // FIXME: terminal does not work anymore in parallel to webserver
 //var bmvterminal = require("./bmv-terminal.js");
@@ -39,7 +40,6 @@ function sseDemo(req, res) {
     {
         //console.log("app.js: received " + newValue + " " + oldValue + " " + timeStamp + " " + key);
 
-        let bmvdata = vedirect.update();
         let current   = bmvdata.batteryCurrent.formatted();
         // let topSOC    = getBestEstimateTopSOC(current).toFixed(1);
         // let bottomSOC = getBestEstimateBottomSOC(current).toFixed(1);
@@ -113,7 +113,7 @@ function sseDemo(req, res) {
     // });
 }
 
-app.use(cookieParser());
+//app.use(cookieParser()); // called before!!
 app.use(session({secret: "Shh, its a secret!"}));
 
 // app.get('/', function(req, res){
@@ -139,19 +139,19 @@ app.get('/event-stream', (req, res) => {
     sseDemo(req.session, res);
 });
 
-
-
+var mode = 0;
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.use('/', routes);
 app.use('/users', users);
 
+// FIXME: this error catcher messes up posting
 /// catch 404 and forwarding to error handler
-app.use(function(req, res, next) {
-    var err = new Error('Not Found');
-    err.status = 404;
-    next(err);
-});
+// app.use(function(req, res, next) {
+//     var err = new Error('Not Found');
+//     err.status = 404;
+//     next(err);
+// });
 
 /// error handlers
 
@@ -179,6 +179,24 @@ app.use(function(err, req, res, next) {
 
 //app.listen(3001);
 //console.log("Event-server running on port 3001");
+
+// FIXME: was not there before, needed?
+// serve the homepage
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/index.html');
+});
+
+app.post('/clicked', (req, res) => {
+    console.log('switching relay to : ' + mode);
+    vedirect.setRelay(mode);
+    if (mode === 0) mode = 1;
+    else mode = 0;
+    // if (err) {
+    //   return console.log(err);
+    // }
+    res.sendStatus(201);
+});
+
 
 
 module.exports = app;

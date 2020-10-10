@@ -8,7 +8,6 @@
     <title>Smart Home Control</title>
     <meta name="description" content="Simple HTML5 Page layout template with header, footer, sidebar etc.">
     <link rel="stylesheet" href="stylesheets/style.css">
-    <script src="javascripts/script.js"></script>
 </head>
 
 <body>
@@ -67,11 +66,12 @@
 	  </div>
 	</div>
       </div>
+      <button id="solarMainsSwitch">Solar/Mains</button>
       <!-- aside>
 	   <div>Sidebar 1</div>
 	   <div>Sidebar 2</div>
 	   <div>Sidebar 3</div>
-</aside-->
+      </aside-->
     </section>
   </main>
   <footer>
@@ -112,6 +112,8 @@
 </footer>
 
 
+    <!-- load script after all html is loaded so the element ids are known -->
+    <script src="javascripts/script.js"></script>
 </body>
 
 </html>
