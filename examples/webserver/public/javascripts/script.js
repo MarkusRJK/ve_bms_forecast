@@ -110,6 +110,17 @@ onload=function()
 	    }
 	} else console("alarmstate not defined");
 
+        if (data.relayState !== undefined)
+	{
+	    if (data.relayState === 'ON') {
+              	document.getElementById('main').setAttribute("style", "display:block");
+              	document.getElementById('solar').setAttribute("style", "display:none");
+            } else {
+              	document.getElementById('solar').setAttribute("style", "display:block");
+              	document.getElementById('main').setAttribute("style", "display:none");
+	    }
+	} else console("relaystate not defined");
+
 	setSOC(data.lowerSOC, 1);
 	setSOC(data.upperSOC, 2);
     }
