@@ -1822,7 +1822,6 @@ class VitronEnergyDevice {
 
         if (Math.floor(parseInt(addressCache['0x034F'].value)) === mode) return;
         
-        // FIXME: set priority 1 (bug: currently not working)
         if (mode === 0)
             this.set('0x034F', '00', priority, force);
         else if (mode === 1)
@@ -1831,14 +1830,10 @@ class VitronEnergyDevice {
             this.set('0x034F', '02', priority, force);
     }
 
-    setRelay(mode) {
-        // FIXME: prioritizing both set_relay_mode and then setRelay pushes
-        //        the setRelay before setting the mode!!! Fix: save prioritization
-        //        in cmdMessageQ and do not allow them being pushed.
+    setRelay(mode, priority, force) {
         logger.trace('VitronEnergyDevice::set relay');
-        // FIXME: for being generic, this should be done outside
-        const priority = 1;
-        const force = true;
+	if (priority === undefined) priority = 0;
+	if (force === undefined) force = false;
         // if setRelay is on force or priority, then set_relay_mode must be too.
         // Otherwise setRelay may 'overtake' set_relay_mode
         this.set_relay_mode(2, priority, force);
@@ -1847,7 +1842,6 @@ class VitronEnergyDevice {
         if (addressCache['0x034E'].value === 'ON') currentMode = 1;
         if (addressCache['0x034E'].value !== null && currentMode === mode) return;
 
-        // FIXME: set priority 1 (bug: currently not working)
         if (mode === 0)
             this.set('0x034E', '00', priority, force);
         else

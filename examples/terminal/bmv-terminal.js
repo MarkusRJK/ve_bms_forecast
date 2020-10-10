@@ -550,11 +550,11 @@ term.on( 'key' , ( name , matches , data ) => {
 	if (bmvdata.relayState.value !== "OFF") relayOnOff = 1;
 	if (relayOnOff == 1) {
 	    term.green('Switch relay off');
-	    vedirect.setRelay(0);
+	    vedirect.setRelay(0, 1, true);
 	}
 	else {
 	    term.green('Switch relay on');
-	    vedirect.setRelay(1);
+	    vedirect.setRelay(1, 1, true);
 	}
     }
     else if ( name === 'S' )
