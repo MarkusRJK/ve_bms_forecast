@@ -19,12 +19,10 @@
     "date": "^1.0.2",
     "log4js": "^2.0.0",
     "mathjs": "^5.1.0",
-    "serialport": "~4.0.0",
+    "serialport": "~4.0.0"
   },
   "author": {
     "name": "Markus Kohler <Markus.Kohler@udo.edu>"
-  },
-  "scripts": {
   },
   "license": "MIT"
 }
