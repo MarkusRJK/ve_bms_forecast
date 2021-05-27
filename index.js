@@ -222,7 +222,7 @@ function endianSwap(hexStr, lengthInBytes)
 // \pre cmd must be a command without the checksum and start
 //      hexadecimal (without ':').
 function append_checksum(cmd) {
-    logger.trace('append_checksumNew');
+    logger.trace('append_checksum');
     const command = '0' + cmd;
 
     const byteInHex = command.split('').map(c => parseInt(c, 16));
@@ -871,6 +871,7 @@ var isConfigured         = false;
 
 var readAppConfig = function()
 {
+    // FIXME: this takes the node_modules/ve_bms_forecast basedir!!!
     const file = __dirname + '/app-config.json';
     fs.readFile(file, 'utf8', (err, data) => {
         if (err) {
@@ -893,7 +894,6 @@ var readAppConfig = function()
 
 readAppConfig();
 
-
 class ReceiverTransmitter {
     constructor() {
         this.isOperational = false;
@@ -905,7 +905,6 @@ class ReceiverTransmitter {
         this.responseMap = {};
         this.cmdQ = new CommandMessageQ();
         this.port = null;
-        this.open(serialportFile);
         this.maxResponseTime = 0;
         this.isRecording = doRecord;
         if (this.isRecording)
@@ -1042,21 +1041,48 @@ class ReceiverTransmitter {
         // TODO: check regularly for left overs in responseMap and cmdMessageQ
     }
 
+    start() {
+	console.log("starting")
+	try {
+	    this.open(serialportFile);
+	}
+	catch (err) {
+	    console.log(err);
+	}
+    }
+
     open(ve_port) {
+	if (! isConfigured ) {
+	    console.log("waiting");
+	    setTimeout(function() {
+		try {
+		    this.start();
+		}
+		catch(err) {
+		    console.log(err);
+		}
+	    }.bind(this), 2000);
+	    return;
+	}
+	console.log("success");
         logger.trace('ReceiverTransmitter::open(.)');
-	// FIXME: 
-	// if (! isConfigured ) ...
-        this.port =  new serialport(ve_port, {
-            baudrate: 19200,
-            parser: serialport.parsers.readline('\r\n', 'binary')});
-        this.port.on('data', function(line) {
-            this.isOperational = true;
-            if (this.isRecording)
-            {
-                this.recordFile.write(line + '\r\n');
-            }
-            this.parseSerialInput(line);
-        }.bind(this));
+	try {
+            this.port =  new serialport(ve_port, {
+		baudrate: 19200,
+		parser: serialport.parsers.readline('\r\n', 'binary')});
+            this.port.on('data', function(line) {
+		this.isOperational = true;
+		if (this.isRecording)
+		{
+                    this.recordFile.write(line + '\r\n');
+		}
+		this.parseSerialInput(line);
+            }.bind(this));
+	}
+	catch (err) {
+	    console.log(err);
+	}
+
     }
 
     close() {
@@ -1420,6 +1446,10 @@ class VitronEnergyDevice {
         this.rxtx.restart();
     }
         
+    start() {
+        if (this.rxtx) this.rxtx.start();
+    }
+
     stop() {
         if (this.rxtx) this.rxtx.close();
     }
@@ -1822,6 +1852,7 @@ class VitronEnergyDevice {
 
         if (Math.floor(parseInt(addressCache['0x034F'].value)) === mode) return;
         
+        // FIXME: set priority 1 (bug: currently not working)
         if (mode === 0)
             this.set('0x034F', '00', priority, force);
         else if (mode === 1)
@@ -1830,10 +1861,14 @@ class VitronEnergyDevice {
             this.set('0x034F', '02', priority, force);
     }
 
-    setRelay(mode, priority, force) {
+    setRelay(mode) {
+        // FIXME: prioritizing both set_relay_mode and then setRelay pushes
+        //        the setRelay before setting the mode!!! Fix: save prioritization
+        //        in cmdMessageQ and do not allow them being pushed.
         logger.trace('VitronEnergyDevice::set relay');
-	if (priority === undefined) priority = 0;
-	if (force === undefined) force = false;
+        // FIXME: for being generic, this should be done outside
+        const priority = 1;
+        const force = true;
         // if setRelay is on force or priority, then set_relay_mode must be too.
         // Otherwise setRelay may 'overtake' set_relay_mode
         this.set_relay_mode(2, priority, force);
@@ -1842,6 +1877,7 @@ class VitronEnergyDevice {
         if (addressCache['0x034E'].value === 'ON') currentMode = 1;
         if (addressCache['0x034E'].value !== null && currentMode === mode) return;
 
+        // FIXME: set priority 1 (bug: currently not working)
         if (mode === 0)
             this.set('0x034E', '00', priority, force);
         else

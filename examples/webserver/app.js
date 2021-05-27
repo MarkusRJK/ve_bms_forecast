@@ -14,8 +14,25 @@ const app = express();
 //const vedirectclass = require( 've_bms_forecast' ).VitronEnergyDevice;
 //const vedirect = new vedirectclass();
 const vedirect = require( './bms' ).BMSInstance;
+var solarState = require( './forecast' ).solarState;
+
+function startBMS() {
+    try {
+	console.log("trying to start vedirect");
+	vedirect.start();
+	console.log("success starting vedirect");
+    }
+    catch(err)
+    {
+	//logger.debug(err);
+	console.log(err);
+	console.log("deferring to start vedirect");
+	setTimeout(startBMS, 2000)
+    }
+}
+startBMS();
+
 const Math = require('mathjs');
-const bmvdata = vedirect.update();
 
 // FIXME: terminal does not work anymore in parallel to webserver
 //var bmvterminal = require("./bmv-terminal.js");
@@ -40,6 +57,7 @@ function sseDemo(req, res) {
     {
         //console.log("app.js: received " + newValue + " " + oldValue + " " + timeStamp + " " + key);
 
+	const bmvdata = vedirect.update();
         let current   = bmvdata.batteryCurrent.formatted();
         // let topSOC    = getBestEstimateTopSOC(current).toFixed(1);
         // let bottomSOC = getBestEstimateBottomSOC(current).toFixed(1);
@@ -136,7 +154,15 @@ app.get('/event-stream', (req, res) => {
     res.write('\n');
 
     console.log("setting up eventstream");
-    sseDemo(req.session, res);
+    try {
+	sseDemo(req.session, res);
+    }
+    catch(err)
+    {
+	//logger.debug(err);
+	console.log(err);
+	setTimeout(sseDemo, 120000, req.session, res);	
+    }
 });
 
 var mode = 0;
@@ -186,11 +212,46 @@ app.get('/', (req, res) => {
   res.sendFile(__dirname + '/index.html');
 });
 
-app.post('/clicked', (req, res) => {
-    console.log('switching relay to : ' + mode);
-    vedirect.setRelay(mode);
-    if (mode === 0) mode = 1;
+
+
+var sunsetTimer = null;
+// get the current mode (switch state):
+var mode = 0;
+const bmvdata = vedirect.update();
+if (bmvdata.relayState.value === 'ON') mode = 1;
+
+function toggle() {
+
+    if (mode === 0) mode = 1
     else mode = 0;
+    //console.log('switching relay to : ' + mode);
+
+    // mode = 0 opens the BMS relay => on Mains
+    vedirect.setRelay(mode, 1, true);
+
+    clearTimeout(sunsetTimer);
+}
+
+app.post('/clicked', (req, res) => {
+
+    toggle();
+
+    if (mode === 1) {
+	//console.log("new mode is 1: set timer to switch back");
+	const now = new Date();
+	//console.log("sunset is in " + solarState.getSunset());
+	// approx 2 hours before sunset or before the current into 
+	// the battery becomes 0
+	const twoHoursTwenteeInMS = 8400000; // (2 * 60 + 20) * 60 * 1000;
+	const timeTillNullChargeInMS = solarState.getSunset() * 1000 - now.getTime()
+		- twoHoursTwenteeInMS;
+	// FIXME: a timer will "get lost" if the server is restarted while 
+	//        switched on. Better to use protection class and feed in sunset
+	//        among parameters current, voltages, soc...
+	// FIXME: also the timer seems not to work if set more than 24 hours in advance
+	sunsetTimer = setTimeout(toggle, timeTillNullChargeInMS);
+    }
+    
     // if (err) {
     //   return console.log(err);
     // }
