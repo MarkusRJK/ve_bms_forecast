@@ -642,6 +642,35 @@ function mapComponents() {
     bmvdata.userCurrentZero     = createObject(1,    "",      "User current zero",
 					   { 'fromHexStr': conv.hexToSint });
     addressCache['0x1034']      = bmvdata.userCurrentZero;
+
+    // Show/don't show certain parameters on BMV
+    bmvdata.showVoltage         = createObject(1,   "",       "Show voltage");
+    addressCache['0xEEE0']      = bmvdata.showVoltage;
+
+    bmvdata.showAuxVoltage      = createObject(1,   "",       "Show auxiliary voltage");
+    addressCache['0xEEE1']      = bmvdata.showAuxVoltage;
+
+    bmvdata.showMidVoltage      = createObject(1,   "",       "Show mid voltage");
+    addressCache['0xEEE2']      = bmvdata.showMidVoltage;
+
+    bmvdata.showCurrent         = createObject(1,   "",       "Show current");
+    addressCache['0xEEE3']      = bmvdata.showCurrent;
+
+    bmvdata.showConsumedAH      = createObject(1,   "",       "Show consumed AH");
+    addressCache['0xEEE4']      = bmvdata.showConsumedAH;
+
+    bmvdata.showSOC             = createObject(1,   "",       "Show SOC");
+    addressCache['0xEEE5']      = bmvdata.showSOC;
+
+    bmvdata.showTimeToGo        = createObject(1,   "",       "Show time to go");
+    addressCache['0xEEE6']      = bmvdata.showTimeToGo;
+
+    bmvdata.showTemperature     = createObject(1,   "",       "Show temperature");
+    addressCache['0xEEE7']      = bmvdata.showTemperature;
+
+    bmvdata.showPower           = createObject(1,   "",       "Show power");
+    addressCache['0xEEE8']      = bmvdata.showPower;
+
 };
 
 mapComponents();

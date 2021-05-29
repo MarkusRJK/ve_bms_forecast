@@ -31,6 +31,7 @@ var fs = require('fs');
 //var log_file = fs.createWriteStream(__dirname + '/debug.log', {flags: 'w'});
 var log_stdout = process.stdout;
 var serialport = require('serialport');
+const Delimiter = require('@serialport/parser-delimiter');
 var conv = require('./hexconv');
 var log4js = require('log4js');
 var deviceCache = require('./device_cache.js');
@@ -1068,9 +1069,11 @@ class ReceiverTransmitter {
         logger.trace('ReceiverTransmitter::open(.)');
 	try {
             this.port =  new serialport(ve_port, {
-		baudrate: 19200,
-		parser: serialport.parsers.readline('\r\n', 'binary')});
-            this.port.on('data', function(line) {
+		baudRate: 19200 });
+	    const delimiterParser = new Delimiter({ delimiter: '\r\n' });
+	    this.port.pipe(delimiterParser);
+	    delimiterParser.on('data', function(data) {
+		let line = data.toString('binary');
 		this.isOperational = true;
 		if (this.isRecording)
 		{

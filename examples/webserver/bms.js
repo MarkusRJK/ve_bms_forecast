@@ -957,7 +957,7 @@ class BMS extends VEdeviceSerialAccu {
         this.lowerDischargeC = new RestingCharacteristic();
         this.upperDischargeC = new RestingCharacteristic();
 
-	this.top|bottomFloatVolume = new FloatVolume(this.bottomAccumulator, this.lowerFloatC, this.lowerDischargeC, this.lowerRestingC);
+	//this.top|bottomFloatVolume = new FloatVolume(this.bottomAccumulator, this.lowerFloatC, this.lowerDischargeC, this.lowerRestingC);
 
         //this.lowerIncCapacity = new IntegralOverTime(this.lowerFlow.getCurrent());
         //this.upperIncCapacity = new IntegralOverTime(this.upperFlow.getCurrent());
