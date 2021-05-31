@@ -930,8 +930,14 @@ class ReceiverTransmitter {
                 && Math.abs(oldValue - obj.newValue) * obj.nativeToUnitFactor >= obj.delta)
             {
                 changeObj = obj;
-		for (let i = 0; i < obj.on.length; ++i)
-		    obj.on[i](obj.newValue, oldValue, this.packageArrivalTime, key);
+		for (let i = 0; i < obj.on.length; ++i) {
+		    try {
+			obj.on[i](obj.newValue, oldValue, this.packageArrivalTime, key);
+		    }
+		    catch (err) {
+			logger.error('updateCacheObject: ' + err);
+		    }
+		}
             }
         }
         obj.newValue = null;
@@ -945,9 +951,14 @@ class ReceiverTransmitter {
         for (const[key, obj] of Object.entries(bmvdata)) {
             changedObjects.push(this.updateCacheObject(key, obj));
         }
-        if (this.on.length > 0)
-	    for (let i = 0; i < this.on.length; ++i)
+	for (let i = 0; i < this.on.length; ++i) {
+	    try {
 		this.on[i](changeObjects, this.packageArrivalTime);
+	    }
+	    catch (err) {
+		logger.error('updateCacheObject: ' + err);
+	    }
+	}
     }
 
     discardValues() {
