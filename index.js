@@ -28,7 +28,6 @@
 const Math = require('mathjs');
 var fs = require('fs');
 //var util = require('util');
-//var log_file = fs.createWriteStream(__dirname + '/debug.log', {flags: 'w'});
 var log_stdout = process.stdout;
 var serialport = require('serialport');
 const Delimiter = require('@serialport/parser-delimiter');
@@ -53,7 +52,8 @@ log4js.configure({
 
 
 const logger = log4js.getLogger();
-logger.level = 'debug';
+module.exports.logger = logger;
+
 
 var date = new Date();
 logger.debug('Service started at ' +
@@ -947,7 +947,8 @@ class ReceiverTransmitter {
     updateValuesAndValueListeners() {
         logger.trace('ReceiverTransmitter::updateValuesAndValueListeners');
         let changedObjects = [];
-	// FIXME: Object.entries(map)
+	// go through all objects that change, i.e. those of map
+	// which are changing values of BMV but also others.
         for (const[key, obj] of Object.entries(bmvdata)) {
             changedObjects.push(this.updateCacheObject(key, obj));
         }
@@ -963,7 +964,6 @@ class ReceiverTransmitter {
 
     discardValues() {
         logger.trace('ReceiverTransmitter::discardValues');
-        // FIXME: should only discard values that are coming from regular updates
         for (const [key, obj] of Object.entries(map)) {
             obj.newValue = null; // dump new values
         } 

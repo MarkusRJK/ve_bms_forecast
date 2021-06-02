@@ -223,10 +223,11 @@ function createObject(nativeToUnitFactor, units, shortDescr, options) {
     obj.formatted = function() {
 	if (this.value === null || this.nativeToUnitFactor === 0) return this.value;
 	// use rounding
-	let div = 1 / this.precision;
-	let scaledToIntPrecision = Number(this.value * this.nativeToUnitFactor * div);
-	// FIXME: occassionally returns x.xx000000000000n for a precision of 0.01
-	return Math.round(scaledToIntPrecision) * this.precision;
+	let div = 1.0 / this.precision;
+	let l = String(div).length;
+	let scaledToIntPrecision = Number(this.value * this.nativeToUnitFactor) + Number.EPSILON;
+	scaledToIntPrecision *= div;
+	return (Math.round(scaledToIntPrecision) * this.precision).toFixed(l-1);
     }
     obj.formattedWithUnit = function() {
 	if (this.units === "s")

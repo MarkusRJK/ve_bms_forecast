@@ -281,7 +281,8 @@ class RestingCharacteristic
     }
 
     isApplicable(flow) {
-	return flow.getCurrent() <= Math.abs(this.maxRestingCurrent);
+	// use small threshold as 0 will rarely happen
+        return flow.getCurrent() <= Math.abs(this.maxRestingCurrent);
     }
 
     getSOC(flow) {
