@@ -957,7 +957,7 @@ class ReceiverTransmitter {
 		this.on[i](changeObjects, this.packageArrivalTime);
 	    }
 	    catch (err) {
-		logger.error('updateCacheObject: ' + err);
+		logger.error('updateValuesAndValueListeners: ' + err);
 	    }
 	}
     }
@@ -2009,7 +2009,7 @@ class VitronEnergyDevice {
     }
 
     createObject(nativeToUnitFactor, units, shortDescr, options) {
-        logger.trace('VitronEnergyDevice::register');
+        logger.trace('VitronEnergyDevice::createObject');
         return deviceCache.createObject(nativeToUnitFactor, units, shortDescr, options);
     }
 }
