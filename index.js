@@ -16,24 +16,26 @@
 // - first parse: parse until checksum ok then create objects from it for cache - only then do the up/download of config
 // - further parse: replace callback function by final parse function to do updates
 // - register function has switch statement to create each object after each other (only those appearing in update packet)
-// - response from BMV to set command: also compare returned value
 // - ensure setTimeout within class works
 
 // FIXES needed:
 // - message times out and is removed from responseMap but then
 //        may still arrive (not being found in repsonseMap -> TODO: timeoutmap???
 // - read relay mode at startup and check cache in later stages whether it needs to be set
-// - debug.log is written into . and /var/log/.
+// - updateValuesAndValueListeners emits Typeerror with isActive no property of undefined
+// - runOnFunction emits Typeerror for topVoltage, midVoltage and batteryCurrent
+// - Device refused to set expected value for setRelay 'r'
+// - this.runOnFunction('FIXME:', addressCache...
+// - .on[null] or .on[null, null] from where???
+// - replace = {} by = new Map() and x[key] by x.set(key, ...)
 
 const Math = require('mathjs');
-var fs = require('fs');
-//var util = require('util');
-var log_stdout = process.stdout;
-var serialport = require('serialport');
+const fs = require('fs');
+const serialport = require('serialport');
 const Delimiter = require('@serialport/parser-delimiter');
-var conv = require('./hexconv');
-var log4js = require('log4js');
-var deviceCache = require('./device_cache.js');
+const conv = require('./hexconv');
+const log4js = require('log4js');
+const deviceCache = require('./device_cache.js');
 
 log4js.configure({
   appenders: {
@@ -878,7 +880,7 @@ var readAppConfig = function()
         if (err) {
             logger.error(`cannot read: ${file} (${err.code === 'ENOENT' ? 'does not exist' : 'is not readable'})`);
         } else {
-            console.log("Parse configuration (JSON format)");
+            console.log("readAppConfig: Parse configuration (JSON format)");
             let config = JSON.parse(data);
             cmdDefaultPriority   = config.Commands.defaultPriority;
             cmdDefaultMaxRetries = config.Commands.defaultMaxRetries;
@@ -915,55 +917,99 @@ class ReceiverTransmitter {
         this.packageArrivalTime = 0;
     }
 
-    updateCacheObject(key, obj) {
+    // copy the values of obj converted to SI units into changeObj
+    SIValues(obj) {
+	let changeObj = {
+	    value:    obj.value    * obj.nativeToUnitFactor,
+	    newValue: obj.newValue * obj.nativeToUnitFactor
+	}
+	return changeObj;
+    }
+    
+    runOnFunction(key, obj) {
         let changeObj = null;
-        //  value received by serial parser ==> newValue != null
-        if (obj.newValue != null && obj.value !== obj.newValue)
+        // value received by serial parser ==> newValue != null, only null is an indicator that
+	// object is not dirty
+        if (obj.newValue !== null && obj.value != obj.newValue)
         {
-            //console.log("updating " + key + " " + obj.value + " => " + obj.newValue);
-            let oldValue = obj.value;
-            obj.value = obj.newValue; // accept new values
             // send event to listeners with values
             // on() means if update applied,
 
-            if (obj.on.length > 0
-                && Math.abs(oldValue - obj.newValue) * obj.nativeToUnitFactor >= obj.delta)
-            {
-                changeObj = obj;
-		for (let i = 0; i < obj.on.length; ++i) {
-		    try {
-			obj.on[i](obj.newValue, oldValue, this.packageArrivalTime, key);
+	    // changeObj becomes non-null only if it is a number and sufficiently different
+	    // or if it is a string, object etc.
+            if (typeof obj.newValue === 'number') {
+		const oldValue = obj.value * obj.nativeToUnitFactor;
+		const newValue = obj.newValue * obj.nativeToUnitFactor;
+		//if (Math.abs(obj.value - obj.newValue) * obj.nativeToUnitFactor >= obj.delta)
+		if (Math.abs(oldValue - newValue) >= obj.delta)
+		{
+		    for (let i = 0; i < obj.on.length; ++i) {
+			try {
+			    // TODO+FIXME: for consistency enter SI values into .on()
+			    if (obj.on[i])
+				obj.on[i](newValue, oldValue, this.packageArrivalTime, key);
+				//obj.on[i](obj.newValue, obj.value, this.packageArrivalTime, key);
+			}
+			catch (err) {
+			    logger.error('runOnFunction(' + key + '): ' + err);
+			}
 		    }
-		    catch (err) {
-			logger.error('updateCacheObject: ' + err);
-		    }
+		    changeObj = this.SIValues(obj);
 		}
-            }
+	    }
+	    else changeObj = this.SIValues(obj);
         }
-        obj.newValue = null;
         return changeObj;
+    }
+
+    updateCache(key) {
+	const obj = bmvdata[key];
+        // value received by serial parser ==> newValue != null, only null is an indicator that
+	// object is not dirty
+	if (obj.newValue !== null) obj.value = obj.newValue; // accept new values
+        obj.newValue = null;
     }
 
     updateValuesAndValueListeners() {
         logger.trace('ReceiverTransmitter::updateValuesAndValueListeners');
-        let changedObjects = [];
+        let changedObjects = new Map(); //{};
 	// go through all objects that change, i.e. those of map
 	// which are changing values of BMV but also others.
+
+	// Parse 1. go through all cached data objects and call their on() functions
+	//          so that all on() functions can rely on newValue being != null and new
+	//          and value is the previous value
+
         for (const[key, obj] of Object.entries(bmvdata)) {
-            changedObjects.push(this.updateCacheObject(key, obj));
+	    const change = this.runOnFunction(key, obj);
+            //if (change) changedObjects[key] = change;
+            if (change) changedObjects.set(key, change);
         }
 	for (let i = 0; i < this.on.length; ++i) {
 	    try {
-		this.on[i](changeObjects, this.packageArrivalTime);
+		if (this.on[i] && changedObjects.size)
+		    this.on[i](changedObjects, this.packageArrivalTime);
 	    }
 	    catch (err) {
+		//FIXME: TypeError: Cannot read property 'newValue' of undefined
 		logger.error('updateValuesAndValueListeners: ' + err);
+		logger.error('      i: ' + i);
+		logger.error('      f: ' + this.on[i]);
+		logger.error('      ' + JSON.stringify(changedObjects));
 	    }
+	}
+
+	// Parse 2. go through all cached data objects and update value with newValue
+	//          and set newValue = null.
+        for (const[key, obj] of Object.entries(bmvdata)) {
+	    this.updateCache(key);
 	}
     }
 
     discardValues() {
         logger.trace('ReceiverTransmitter::discardValues');
+	// do not discard all cached entries but only those
+	// that relate to the checksum, i.e. that appear in map
         for (const [key, obj] of Object.entries(map)) {
             obj.newValue = null; // dump new values
         } 
@@ -976,21 +1022,16 @@ class ReceiverTransmitter {
     registerListener(listener)
     {
         logger.trace('ReceiverTransmitter::registerListener');
-        this.on.push(listener);
-    }
-
-    findListenerIndex(listener) {
-	for (let i = 0; i < this.on.length; ++i)
-	{
-	    if (this.on[i] === listener) return i;
-	}
+        if (listener) this.on.push(listener);
     }
 
     deregisterListener(listener)
     {
         logger.trace('ReceiverTransmitter::deregisterListener');
-	let i = findListenerIndex(listener);
-	delete this.on[i];
+	if (! listener) return;
+	const i = this.on.findIndex((element) => element === listener);
+	if (i < 0 || i >= this.on.length) return;
+	this.on.splice(i, 1);
     }
 
     evaluate(response) {
@@ -1006,12 +1047,16 @@ class ReceiverTransmitter {
         } 
         else if (id in this.responseMap)
         {
+	    // FIXME: clear timeout only if 'Device DOES NOT refuse to set expected value'
             clearTimeout(this.responseMap[id].timerId)
             logger.debug(id + ' in responseMap ==> clear timeout');
             // logger.errors are for finding conv.hexToInt issue (to be removed)
             if (this.responseMap[id].expect
                 !== response.getMessage().substring(0, this.responseMap[id].expect.length)) {
-                logger.error('Device refused to set expected value');
+		// FIXME: do we still see this with setRelay??? or elsewhere
+                logger.error('Device refused to set expected value: ' +
+			     this.responseMap[id].expect + '; received: ' +
+			     response.getMessage().substring(0, this.responseMap[id].expect.length));
             }
             else { // process response and remove it from Q and responseMap
                 switch (this.responseMap[id].func(response)) {
@@ -1110,7 +1155,7 @@ class ReceiverTransmitter {
         // a line contains a key value pair separated by tab:
         let res = line.split('\t');
         // res[0] is the key, res[1] the value
-        if (!res[0] || res[0] === '')
+        if (!res[0])
         {
             if (res[1] && res[1].length > 1 && res[1].substring(1).split(':'))
             {
@@ -1142,8 +1187,7 @@ class ReceiverTransmitter {
             cs = cs % 256;
             if (cs === 0) // valid checksum for periodic frames
             {
-                //console.log("updateValuesAndValueListeners");
-                this.updateValuesAndValueListeners(false);
+                this.updateValuesAndValueListeners();
             }
             else // checksum invalid
             {
@@ -1190,14 +1234,23 @@ class ReceiverTransmitter {
         }
         else
         {
-            if (res[0] === undefined) return;
             // a line consist of:
             // field name + tab + field value + return
             // the "return is consumed outside parseSerialInput by the readline command
             // the "tab" is consumed by the split command at the top of this function
             this.checksum.update(line);
             if (this.packageArrivalTime === 0) this.packageArrivalTime = Date.now();
-            if (res[0] in map && map[res[0]] !== undefined) map[res[0]].newValue = res[1];
+            if (res[0] in map && map[res[0]] !== undefined) {
+		// all values res[1] come in as integer values, with three exceptions:
+		// PID is a hex number, e.g. "0x204"
+		// Alarm and Relay are "ON" or "OFF"
+		const newValue = parseInt(res[1]); // converts string to int, Alarm/Relay to NaN
+		// PID now is converted to decimal
+		if (!newValue) // i.e. Alarm and Relay
+		    map[res[0]].newValue = res[1]; // typeof newValue = 'string'
+		else
+		    map[res[0]].newValue = newValue; // typeof newValue = 'number'
+	    }
             else logger.warn('parseSerialInput: ' + res[0]
                              + ' is not registered and has value ' + res[1]);
         }
@@ -1354,7 +1407,8 @@ class ReceiverTransmitter {
             let value = response.getValue();
             if (commandId === productIdCommand) {
                 bmvdata.productId.newValue = value;
-                this.updateCacheObject('productId', bmvdata.productId); // ignore returned object
+                this.runOnFunction('productId', bmvdata.productId); // ignore returned object
+		this.updateCache('productId');
                 logger.debug('Product Id response: '
                              + bmvdata.productId.shortDescr + ' '
                              + bmvdata.productId.formatted() + ' - cache updated');
@@ -1362,7 +1416,8 @@ class ReceiverTransmitter {
             else { // commandId === versionCommand
                 const releaseCandidate = value.charAt(0);
                 bmvdata.version.newValue = value.substring(1);
-                this.updateCacheObject('version', bmvdata.version); // ignore returned object
+                this.runOnFunction('version', bmvdata.version); // ignore returned object
+		this.updateCache('version');
                 logger.debug('Ping/Version response: '
                              + bmvdata.version.shortDescr + ' ' + bmvdata.version.formatted()
                              + ' release candidate ' + releaseCandidate + ' - cache updated');
@@ -1383,8 +1438,9 @@ class ReceiverTransmitter {
                     addressCache[address].newValue = addressCache[address].fromHexStr(response.getValue());
                     logger.debug('response for ' + address + ': updating cache');
                     // FIXME: addressCache must point to the bmvdata keys!!!
-                    // i.e. here updateCacheObject(bmvdata[addressCache[address]]...
-                    this.updateCacheObject('FIXME', addressCache[address]); // ignore returned object
+                    // i.e. here runOnFunction(bmvdata[addressCache[address]]...
+                    //this.runOnFunction('FIXME:', addressCache[address]); // ignore returned object
+		    //this.updateCache('FIXME:');
                 }
                 else {
                     logger.warn(address + ' is not in addressCache');
@@ -1441,22 +1497,22 @@ class ReceiverTransmitter {
 
 
 
-class VitronEnergyDevice {
+class VictronEnergyDevice {
 
     constructor() {
-        logger.trace('VitronEnergyDevice::constructor');
-        if(! VitronEnergyDevice.instance){
+        logger.trace('VictronEnergyDevice::constructor');
+        if(! VictronEnergyDevice.instance){
             this.rxtx = new ReceiverTransmitter();
-            VitronEnergyDevice.instance = this;
+            VictronEnergyDevice.instance = this;
             // FIXME: object freeze does not work as it should
-            Object.freeze(VitronEnergyDevice);
+            Object.freeze(VictronEnergyDevice);
         }
-        return VitronEnergyDevice.instance;
+        return VictronEnergyDevice.instance;
     }
 
 
     restart() {
-        logger.trace('VitronEnergyDevice::restart');
+        logger.trace('VictronEnergyDevice::restart');
         this.rxtx.restart();
     }
         
@@ -1470,7 +1526,7 @@ class VitronEnergyDevice {
 
     // \param force keep trying until successful
     get(address, priority, force) {
-        logger.trace('VitronEnergyDevice::get(address): ' + address);
+        logger.trace('VictronEnergyDevice::get(address): ' + address);
         let maxRetries = 3;
         if (force)
             // maxRetries = MAX_SAFE_INTEGER not defined
@@ -1484,7 +1540,7 @@ class VitronEnergyDevice {
     //        with byte pairs swapped, i.e. 1B83 => 831B
     // \param force in {true, false} keep trying until successful
     set(address, value, priority, force) {
-        logger.trace('VitronEnergyDevice::set(address): ' + address);
+        logger.trace('VictronEnergyDevice::set(address): ' + address);
         let maxRetries = 3;
         if (force)
             // maxRetries = MAX_SAFE_INTEGER not defined
@@ -1498,13 +1554,13 @@ class VitronEnergyDevice {
     // FIXME: the following shown functions need addressCache to be created before calling them
     isVoltageShown()
     {
-        logger.trace('VitronEnergyDevice::isVoltageShown: ' + address);
+        logger.trace('VictronEnergyDevice::isVoltageShown: ' + address);
         get('0xEEE0');
     }
 
     setStateOfCharge(soc)
     {
-        logger.trace('VitronEnergyDevice::setStateOfCharge: ' + soc);
+        logger.trace('VictronEnergyDevice::setStateOfCharge: ' + soc);
         if (soc < 0 || soc > 100)
         {
             logger.debug('soc out of range: ' + soc);
@@ -1518,12 +1574,12 @@ class VitronEnergyDevice {
 
     getStateOfCharge()
     {
-        logger.trace('VitronEnergyDevice::getStateOfCharge');
+        logger.trace('VictronEnergyDevice::getStateOfCharge');
         this.get('0x0FFF');
     }
 
     setBatteryCapacity(capacity) {
-        logger.trace('VitronEnergyDevice::setBatteryCapacity to ' + capacity);
+        logger.trace('VictronEnergyDevice::setBatteryCapacity to ' + capacity);
 
         let strCapacity = toEndianHexStr(capacity, 2);
         this.set('0x1000', strCapacity);
@@ -1531,79 +1587,79 @@ class VitronEnergyDevice {
 
     getBatteryCapacity()
     {
-        logger.trace('VitronEnergyDevice::getBatteryCapacity');
+        logger.trace('VictronEnergyDevice::getBatteryCapacity');
         this.get('0x1000');
     }
 
     setChargedVoltage(voltage)
     {
-        logger.trace('VitronEnergyDevice::setChargedVoltage to ' + voltage);
+        logger.trace('VictronEnergyDevice::setChargedVoltage to ' + voltage);
         let strVoltage = toEndianHexStr(voltage, 2);
         this.set('0x1001', strVoltage);
     }
 
     getChargedVoltage()
     {
-        logger.trace('VitronEnergyDevice::getChargedVoltage');
+        logger.trace('VictronEnergyDevice::getChargedVoltage');
         this.get('0x1001');
     }
 
     setTailCurrent(current)
     {
-        logger.trace('VitronEnergyDevice::setTailCurrent to ' + current);
+        logger.trace('VictronEnergyDevice::setTailCurrent to ' + current);
         let strCurrent = toEndianHexStr(current, 2);
         this.set('0x1002', strCurrent);
     }
 
     getTailCurrent()
     {
-        logger.trace('VitronEnergyDevice::getTailCurrent');
+        logger.trace('VictronEnergyDevice::getTailCurrent');
         this.get('0x1002');
     }
 
     setChargedDetectTime(time)
     {
-        logger.trace('VitronEnergyDevice::setChargedDetectTime to ' + time);
+        logger.trace('VictronEnergyDevice::setChargedDetectTime to ' + time);
         let strTime = toEndianHexStr(time, 2);
         this.set('0x1003', strTime);
     }
 
     getChargedDetectTime()
     {
-        logger.trace('VitronEnergyDevice::getChargedDetectTime');
+        logger.trace('VictronEnergyDevice::getChargedDetectTime');
         this.get('0x1003');
     }
 
 
     setChargeEfficiency(percent)
     {
-        logger.trace('VitronEnergyDevice::setChargeEfficiency to ' + percent);
+        logger.trace('VictronEnergyDevice::setChargeEfficiency to ' + percent);
         let strPerc = toEndianHexStr(percent, 2);
         this.set('0x1004', strPerc);
     }
 
     getChargeEfficiency()
     {
-        logger.trace('VitronEnergyDevice::getChargeEfficiency');
+        logger.trace('VictronEnergyDevice::getChargeEfficiency');
         this.get('0x1004');
     }
 
     setPeukertCoefficient(coeff)
     {
-        logger.trace('VitronEnergyDevice::setPeukertCoefficient to ' + coeff);
+        logger.trace('VictronEnergyDevice::setPeukertCoefficient to ' + coeff);
         let strCoeff = toEndianHexStr(coeff, 2);
         this.set('0x1005', strCoeff);
     }
 
     getPeukertCoefficient()
     {
-        logger.trace('VitronEnergyDevice::getPeukertCoefficient');
+        logger.trace('VictronEnergyDevice::getPeukertCoefficient');
         this.get('0x1005');
     }
 
     setCurrentThreshold(current)
     {
-        logger.trace('VitronEnergyDevice::setCurrentThreshold to ' + current);
+        logger.trace('VictronEnergyDevice::setCurrentThreshold to ' + current);
         let strCurrent = toEndianHexStr(current, 2);
         this.set('0x1006', strCurrent);
     }
@@ -1611,156 +1667,156 @@ class VitronEnergyDevice {
     // FIXME: feasble?
     getCurrentThreshold()
     {
-        logger.trace('VitronEnergyDevice::getCurrentThreshold');
+        logger.trace('VictronEnergyDevice::getCurrentThreshold');
         this.get('0x1006');
     }
 
     setTimeToGoDelta(time)
     {
-        logger.trace('VitronEnergyDevice::setTimeToGoDelta to ' + time);
+        logger.trace('VictronEnergyDevice::setTimeToGoDelta to ' + time);
         let strTime = toEndianHexStr(time, 2);
         this.set('0x1007', strTime);
     }
 
     getTimeToGoDelta()
     {
-        logger.trace('VitronEnergyDevice::getTimeToGoDelta');
+        logger.trace('VictronEnergyDevice::getTimeToGoDelta');
         this.get('0x1007');
     }
 
     isTimeToGoShown()
     {
-        logger.trace('VitronEnergyDevice::isTimeToGoShown');
+        logger.trace('VictronEnergyDevice::isTimeToGoShown');
         this.get('0xEEE6');
     }
 
     setShowTimeToGo(onOff)
     {
-        logger.trace('VitronEnergyDevice::setShowTimeToGo to ' + onOff);
+        logger.trace('VictronEnergyDevice::setShowTimeToGo to ' + onOff);
         let strOnOff = toEndianHexStr(onOff, 1);
         this.set('0xEEE6', strOnOff);
     }
 
     isTemperatureShown() {
-        logger.trace('VitronEnergyDevice::isTemperatureShown');
+        logger.trace('VictronEnergyDevice::isTemperatureShown');
         this.get('0xEEE7');
     }
 
     setShowTemperature(onOff)
     {
-        logger.trace('VitronEnergyDevice::setShowTemperature to ' + onOff);
+        logger.trace('VictronEnergyDevice::setShowTemperature to ' + onOff);
         let strOnOff = toEndianHexStr(onOff, 1);
         this.set('0xEEE7', strOnOff);
     }
 
     isPowerShown()
     {
-        logger.trace('VitronEnergyDevice::isPowerShown');
+        logger.trace('VictronEnergyDevice::isPowerShown');
         this.get('0xEEE8');
     }
 
     setShowPower(onOff)
     {
-        logger.trace('VitronEnergyDevice::setShowPower to ' + onOff);
+        logger.trace('VictronEnergyDevice::setShowPower to ' + onOff);
         let strOnOff = toEndianHexStr(onOff, 1);
         this.set('0xEEE8', strOnOff);
     }
 
     setRelayLowSOC(percent)
     {
-        logger.trace('VitronEnergyDevice::setRelayLowSOC to ' + percent);
+        logger.trace('VictronEnergyDevice::setRelayLowSOC to ' + percent);
         let strPercent = toEndianHexStr(percent, 2);
         this.set('0x1008', strPercent);
     }
 
     getRelayLowSOC()
     {
-        logger.trace('VitronEnergyDevice::getRelayLowSOC');
+        logger.trace('VictronEnergyDevice::getRelayLowSOC');
         this.get('0x1008');
     }
 
     setRelayLowSOCClear(percent)
     {
-        logger.trace('VitronEnergyDevice::setRelayLowSOCClear to ' + percent);
+        logger.trace('VictronEnergyDevice::setRelayLowSOCClear to ' + percent);
         let strPercent = toEndianHexStr(percent, 2);
         this.set('0x1009', strPercent);
     }
 
     getRelayLowSOCClear()
     {
-        logger.trace('VitronEnergyDevice::getRelayLowSOCClear');
+        logger.trace('VictronEnergyDevice::getRelayLowSOCClear');
         this.get('0x1009');
     }
 
     setUserCurrentZero(count)
     {
-        logger.trace('VitronEnergyDevice::setUserCurrentZero to ' + count);
+        logger.trace('VictronEnergyDevice::setUserCurrentZero to ' + count);
         let strCount = toEndianHexStr(count, 2);
         this.set('0x1034', strCount);
     }
 
     getUserCurrentZero()
     {
-        logger.trace('VitronEnergyDevice::getUserCurrentZero');
+        logger.trace('VictronEnergyDevice::getUserCurrentZero');
         get('0x1034');
     }
 
     setShowVoltage(onOff)
     {
-        logger.trace('VitronEnergyDevice::setShowVoltage to ' + onOff);
+        logger.trace('VictronEnergyDevice::setShowVoltage to ' + onOff);
         let strOnOff = toEndianHexStr(onOff, 1);
         this.set('0xEEE0', strOnOff);
     }
 
     isAuxiliaryVoltageShown()
     {
-        logger.trace('VitronEnergyDevice::isAuxiliaryVoltageShown');
+        logger.trace('VictronEnergyDevice::isAuxiliaryVoltageShown');
         get('0xEEE1');
     }
     
     setShowAuxiliaryVoltage(onOff)
     {
-        logger.trace('VitronEnergyDevice::setShowAuxiliaryVoltage to ' + onOff);
+        logger.trace('VictronEnergyDevice::setShowAuxiliaryVoltage to ' + onOff);
         let strOnOff = toEndianHexStr(onOff, 1);
         this.set('0xEEE1', strOnOff);
     }
 
     setShowMidVoltage(onOff)
     {
-        logger.trace('VitronEnergyDevice::setShowMidVoltage to ' + onOff);
+        logger.trace('VictronEnergyDevice::setShowMidVoltage to ' + onOff);
         let strOnOff = toEndianHexStr(onOff, 1);
         this.set('0xEEE2', strOnOff);
     }
 
     isCurrentShown()
     {
-        logger.trace('VitronEnergyDevice::isCurrentShown');
+        logger.trace('VictronEnergyDevice::isCurrentShown');
         this.get('0xEEE3');
     }
 
     isMidVoltageShown()
     {
-        logger.trace('VitronEnergyDevice::isMidVoltageShown');
+        logger.trace('VictronEnergyDevice::isMidVoltageShown');
         this.get('0xEEE2');
     }
 
     setShowCurrent(onOff)
     {  
-        logger.trace('VitronEnergyDevice::setShowCurrent to ' + onOff);
+        logger.trace('VictronEnergyDevice::setShowCurrent to ' + onOff);
         let strOnOff = toEndianHexStr(onOff, 1);
         this.set('0xEEE3', strOnOff);
     }
 
     setShowConsumedAh(onOff)
     {
-        logger.trace('VitronEnergyDevice::setShowConsumedAh to ' + onOff);
+        logger.trace('VictronEnergyDevice::setShowConsumedAh to ' + onOff);
         let strOnOff = toEndianHexStr(onOff, 1);
         this.set('0xEEE4', strOnOff);
     }
 
     isConsumedAhShown()
     {
-        logger.trace('VitronEnergyDevice::isConsumedAhShown');
+        logger.trace('VictronEnergyDevice::isConsumedAhShown');
         this.get('0xEEE4');
     }
 
@@ -1773,13 +1829,13 @@ class VitronEnergyDevice {
 
     isStateOfChargeShown()
     {
-        logger.trace('VitronEnergyDevice::isStateOfChargeShown');
+        logger.trace('VictronEnergyDevice::isStateOfChargeShown');
         this.get('0xEEE5');
     }
 
     writeDeviceConfig(newCurrent, oldCurrent, precision, timestamp)
     {
-        logger.trace('VitronEnergyDevice::writeDeviceConfig');
+        logger.trace('VictronEnergyDevice::writeDeviceConfig');
         // writeDeviceConfig is called by relayLowSOCClear's
         // on function. Until then updateValuesAndValueListeners
         // has written all newValue's to value with the exception
@@ -1831,7 +1887,7 @@ class VitronEnergyDevice {
 
     getDeviceConfig(doSave)
     {
-        logger.trace('VitronEnergyDevice::getDeviceConfig');
+        logger.trace('VictronEnergyDevice::getDeviceConfig');
 
         if (doSave) {
             // prepare for saving the data:
@@ -1862,7 +1918,7 @@ class VitronEnergyDevice {
 
     // \param mode 0 = default, 1 = charge, 2 = remote
     set_relay_mode(mode, priority, force) {
-        logger.trace('VitronEnergyDevice::set relay mode');
+        logger.trace('VictronEnergyDevice::set relay mode');
 
         if (Math.floor(parseInt(addressCache['0x034F'].value)) === mode) return;
         
@@ -1879,7 +1935,7 @@ class VitronEnergyDevice {
         // FIXME: prioritizing both set_relay_mode and then setRelay pushes
         //        the setRelay before setting the mode!!! Fix: save prioritization
         //        in cmdMessageQ and do not allow them being pushed.
-        logger.trace('VitronEnergyDevice::set relay');
+        logger.trace('VictronEnergyDevice::set relay');
         // FIXME: for being generic, this should be done outside
         const priority = 1;
         const force = true;
@@ -1899,18 +1955,18 @@ class VitronEnergyDevice {
     }
 
     setAlarm() {
-        logger.trace('VitronEnergyDevice::set alarm');
+        logger.trace('VictronEnergyDevice::set alarm');
         this.set('0xEEFC', '01');
     }
     
     clearAlarm() {
-        logger.trace('VitronEnergyDevice::clear alarm');
+        logger.trace('VictronEnergyDevice::clear alarm');
         //this.set('0xEEFC', '00');
         this.set('0x031F', '00');
     }
 
     ping(priority, force) {
-        logger.trace('VitronEnergyDevice::ping');
+        logger.trace('VictronEnergyDevice::ping');
         let maxRetries = 3;
         if (force)
             // maxRetries = MAX_SAFE_INTEGER not defined
@@ -1921,7 +1977,7 @@ class VitronEnergyDevice {
     };
 
     app_version(priority, force) {
-        logger.trace('VitronEnergyDevice::app version');
+        logger.trace('VictronEnergyDevice::app version');
         let maxRetries = 3;
         if (force)
             // maxRetries = MAX_SAFE_INTEGER not defined
@@ -1932,7 +1988,7 @@ class VitronEnergyDevice {
     }
 
     productId(priority, force) {
-        logger.trace('VitronEnergyDevice::product id');
+        logger.trace('VictronEnergyDevice::product id');
         let maxRetries = 3;
         if (force)
             // maxRetries = MAX_SAFE_INTEGER not defined
@@ -1966,60 +2022,54 @@ class VitronEnergyDevice {
     registerListener(property, listener)
     {
 	if (! property || ! listener) return;
-        logger.trace('VitronEnergyDevice::registerListener(' + property + ')');
+        logger.trace('VictronEnergyDevice::registerListener(' + property + ')');
         if (property === 'ChangeList') this.rxtx.registerListener(listener);
         else if (property in bmvdata) {
             bmvdata[property].on.push(listener);
             // send current value at registration as baseline
-            listener(bmvdata[property].value,
-                     bmvdata[property].value, // first value: newValue = value
+            listener(bmvdata[property].newValue,
+                     bmvdata[property].value, 
                      Date.now(),
                      property);
         }
     }
     
-    findListenerIndex(property, listener) {
-	for (let i = 0; i < bmvdata[property].on.length; ++i)
-	{
-	    if (bmvdata[property].on[i] === listener) return i;
-	}
-    }
-
     deregisterListener(property, listener)
     {
 	if (! property || ! listener) return;
-        logger.trace('VitronEnergyDevice::deregisterListener(' + property + ')');
+        logger.trace('VictronEnergyDevice::deregisterListener(' + property + ')');
         if (property === 'ChangeList') this.rxtx.deregisterListener(listener);
         else if (property in bmvdata) {
-	    let i = findListenerIndex(property, listener);
-	    delete bmvdata[property].on[i];
+	    const i = bmvdata[property].on.findIndex((element) => element === listener);
+	    if (i < 0 || i >= this.on.length) return;
+	    bmvdata[property].on.splice(i, 1);
         }
     }
     
     hasListeners(property)
     {
-        logger.trace('VitronEnergyDevice::hasListener');
+        logger.trace('VictronEnergyDevice::hasListener');
         if (property === 'ChangeList') return this.rxtx.on.length > 0;
         else return (bmvdata[property].on.length > 0);
     }
 
     update() {
-        logger.trace('VitronEnergyDevice::update');
+        logger.trace('VictronEnergyDevice::update');
         return bmvdata;
     }
 
     createObject(nativeToUnitFactor, units, shortDescr, options) {
-        logger.trace('VitronEnergyDevice::createObject');
+        logger.trace('VictronEnergyDevice::createObject');
         return deviceCache.createObject(nativeToUnitFactor, units, shortDescr, options);
     }
 }
 
 // ES6:
-// const instance = new VitronEnergyDevice();
+// const instance = new VictronEnergyDevice();
 // export default instance;
-module.exports.VitronEnergyDevice = VitronEnergyDevice;
-// add module.exports.VitronEnergyDevice.instance and then freeze the object
+module.exports.VictronEnergyDevice = VictronEnergyDevice;
+// add module.exports.VictronEnergyDevice.instance and then freeze the object
 // FIXME: make freeze work again!!!
-//Object.freeze(exports.VitronEnergyDevice);
+//Object.freeze(exports.VictronEnergyDevice);
 
 

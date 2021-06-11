@@ -4,17 +4,22 @@ var conv = require('./hexconv');
 var fs = require('fs');
 
 
+// FIXME: does not log at all
 log4js.configure({
   appenders: {
-    everything: { type: 'file', filename: 'debug.log' }
+      everything: {
+          type: 'file',
+          filename: '/var/log/debug.log',
+          // layout basic should result in 2020-02-20 ... format
+          layout: { type: 'basic'}
+      }
   },
   categories: {
-    default: { appenders: [ 'everything' ], level: 'debug' }
+    default: { appenders: ['everything'], level: 'trace' }
   }
 });
 
 const logger = log4js.getLogger();
-logger.level = 'debug';
 
 // Data model:
 //
@@ -79,37 +84,38 @@ function formatSeconds(duration) {
 }
 
 var getProductLongname = function(pid) {
-    if (pid == "0x203" ) return("BMV-700");
-    if (pid == "0x204" ) return("BMV-702");
-    if (pid == "0x205" ) return("BMV-700H");
-    if (pid == "0xA381") return("BMV-712");
-    if (pid == "0x300" ) return("BlueSolar MPPT 70/15");        // model phased out
-    if (pid == "0xA04C") return("BlueSolar MPPT 75/10");
-    if (pid == "0xA042") return("BlueSolar MPPT 75/15");
-    if (pid == "0xA040") return("BlueSolar MPPT 75/50");        // model phased out
-    if (pid == "0xA043") return("BlueSolar MPPT 100/15");
-    if (pid == "0xA044") return("BlueSolar MPPT 100/30");       // model phased out
-    if (pid == "0xA04A") return("BlueSolar MPPT 100/30 rev 2");
-    if (pid == "0xA045") return("BlueSolar MPPT 100/50 rev 1"); // model phased out
-    if (pid == "0xA049") return("BlueSolar MPPT 100/50 rev 2");
-    if (pid == "0xA041") return("BlueSolar MPPT 150/35 rev 1"); // model phased out
-    if (pid == "0xA04B") return("BlueSolar MPPT 150/35 rev 2");
-    if (pid == "0xA04D") return("BlueSolar MPPT 150/45");
-    if (pid == "0xA04E") return("BlueSolar MPPT 150/60");
-    if (pid == "0xA046") return("BlueSolar MPPT 150/70");
-    if (pid == "0xA04F") return("BlueSolar MPPT 150/85");
-    if (pid == "0xA047") return("BlueSolar MPPT 150/100");
-    if (pid == "0xA051") return("SmartSolar MPPT 150/100");
-    if (pid == "0xA050") return("SmartSolar MPPT 250/100");
-    if (pid == "0xA201") return("Phoenix Inverter 12V 250VA 230V");
-    if (pid == "0xA202") return("Phoenix Inverter 24V 250VA 230V");
-    if (pid == "0xA204") return("Phoenix Inverter 48V 250VA 230V");
-    if (pid == "0xA211") return("Phoenix Inverter 12V 375VA 230V");
-    if (pid == "0xA212") return("Phoenix Inverter 24V 375VA 230V");
-    if (pid == "0xA214") return("Phoenix Inverter 48V 375VA 230V");
-    if (pid == "0xA221") return("Phoenix Inverter 12V 500VA 230V");
-    if (pid == "0xA222") return("Phoenix Inverter 24V 500VA 230V");
-    if (pid == "0xA224") return("Phoenix Inverter 48V 500VA 230V");
+    logger.trace('getProductLongname');
+    if (pid === parseInt("0x203" )) return("BMV-700");
+    if (pid === parseInt("0x204" )) return("BMV-702");
+    if (pid === parseInt("0x205" )) return("BMV-700H");
+    if (pid === parseInt("0xA381")) return("BMV-712");
+    if (pid === parseInt("0x300" )) return("BlueSolar MPPT 70/15");        // model phased out
+    if (pid === parseInt("0xA04C")) return("BlueSolar MPPT 75/10");
+    if (pid === parseInt("0xA042")) return("BlueSolar MPPT 75/15");
+    if (pid === parseInt("0xA040")) return("BlueSolar MPPT 75/50");        // model phased out
+    if (pid === parseInt("0xA043")) return("BlueSolar MPPT 100/15");
+    if (pid === parseInt("0xA044")) return("BlueSolar MPPT 100/30");       // model phased out
+    if (pid === parseInt("0xA04A")) return("BlueSolar MPPT 100/30 rev 2");
+    if (pid === parseInt("0xA045")) return("BlueSolar MPPT 100/50 rev 1"); // model phased out
+    if (pid === parseInt("0xA049")) return("BlueSolar MPPT 100/50 rev 2");
+    if (pid === parseInt("0xA041")) return("BlueSolar MPPT 150/35 rev 1"); // model phased out
+    if (pid === parseInt("0xA04B")) return("BlueSolar MPPT 150/35 rev 2");
+    if (pid === parseInt("0xA04D")) return("BlueSolar MPPT 150/45");
+    if (pid === parseInt("0xA04E")) return("BlueSolar MPPT 150/60");
+    if (pid === parseInt("0xA046")) return("BlueSolar MPPT 150/70");
+    if (pid === parseInt("0xA04F")) return("BlueSolar MPPT 150/85");
+    if (pid === parseInt("0xA047")) return("BlueSolar MPPT 150/100");
+    if (pid === parseInt("0xA051")) return("SmartSolar MPPT 150/100");
+    if (pid === parseInt("0xA050")) return("SmartSolar MPPT 250/100");
+    if (pid === parseInt("0xA201")) return("Phoenix Inverter 12V 250VA 230V");
+    if (pid === parseInt("0xA202")) return("Phoenix Inverter 24V 250VA 230V");
+    if (pid === parseInt("0xA204")) return("Phoenix Inverter 48V 250VA 230V");
+    if (pid === parseInt("0xA211")) return("Phoenix Inverter 12V 375VA 230V");
+    if (pid === parseInt("0xA212")) return("Phoenix Inverter 24V 375VA 230V");
+    if (pid === parseInt("0xA214")) return("Phoenix Inverter 48V 375VA 230V");
+    if (pid === parseInt("0xA221")) return("Phoenix Inverter 12V 500VA 230V");
+    if (pid === parseInt("0xA222")) return("Phoenix Inverter 24V 500VA 230V");
+    if (pid === parseInt("0xA224")) return("Phoenix Inverter 48V 500VA 230V");
     if (pid) logger.warn("getProductLongname: Unknown product: " + pid);
     return ("Unknown");
 };
@@ -221,6 +227,7 @@ function createObject(nativeToUnitFactor, units, shortDescr, options) {
     obj.shortDescr = shortDescr;
     // format and scale from raw value to unit-value with given precision
     obj.formatted = function() {
+	// TODO: use typeof this.value in 'boolean', 'string', 'number'...
 	if (this.value === null || this.nativeToUnitFactor === 0) return this.value;
 	// use rounding
 	let div = 1.0 / this.precision;
@@ -330,9 +337,11 @@ function mapComponents() {
 					   { 'fromHexStr': conv.hexToOnOff });
     map['LOAD']                 = bmvdata.load;
 
+// FIXME: setting precision to 0.1 leaves a whole trail of digits after .
     // BMV600, BMV700, MPPT, Phoenix Inverter - Display: MAIN; Type: Sn16; Unit: 0.01V!!!
     bmvdata.upperVoltage        = createObject(0.001,  "V",   "Main Voltage",
 					   { 'description': "Main (Battery) Voltage",
+//					     'precision': 0.1,
 					     'fromHexStr': (hex) => { return 10 * conv.hexToSint(hex); }});
     map['V']                    = bmvdata.upperVoltage;
     addressCache['0xED8D']      = bmvdata.upperVoltage;
@@ -340,6 +349,7 @@ function mapComponents() {
     // BMV700 - Display: MID; Type: Un16; Units: 0.01V!!! (only BMV-702 and BMV-712)
     bmvdata.midVoltage          = createObject(0.001,  "V",   "Mid Voltage",
 					   { 'description': "Mid-point Voltage of the Battery Bank",
+//					     'precision': 0.1,
 					     'fromHexStr': (hex) => { return 10 * conv.hexToSint(hex); }});
     // only on BMV-702 and BMV-712
     map['VM']                   = bmvdata.midVoltage;
