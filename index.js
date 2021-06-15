@@ -36,13 +36,14 @@ const Delimiter = require('@serialport/parser-delimiter');
 const conv = require('./hexconv');
 const log4js = require('log4js');
 const deviceCache = require('./device_cache.js');
+const CacheObject = require('./device_cache.js').CacheObject;
 
 log4js.configure({
   appenders: {
       everything: {
           type: 'file',
           filename: '/var/log/debug.log',
-          // layout basic should result in 2020-02-20 ... format
+          // layout basic: [2021-06-11T22:17:03.068]
           layout: { type: 'basic'}
       }
   },
@@ -54,8 +55,8 @@ log4js.configure({
 
 
 const logger = log4js.getLogger();
-module.exports.logger = logger;
-
+// FIXME: use getLogger in other module rather than exporting it:
+module.exports.logger = logger; // export for inheriting classes
 
 var date = new Date();
 logger.debug('Service started at ' +
@@ -81,14 +82,14 @@ logger.debug('Service started at ' +
 //                    multiplied by 10 to get millivolts.
 // bmvdata:      maps human readable names to the same objects,
 //               e.g. 'V' is the upper voltage, hence bmvdata.upperVoltage
-// map:          maps the keys of the 1-second-updates to the same objects
+// victronMap:   maps the keys of the 1-second-updates to the same objects
 //               e.g. in the package is a string "V<tab>24340" which
 //                    will be written to map['V'].value and
 //               maps contains more values than contained in the packages
 
 // Protocol on BMV 702:
 //
-// There are 2 periodic frames arriving at the serial port:
+// There are 2 periodic frames arriving in alteration at the serial port:
 // 1. Frame with PID, V, VM, DM, I, P, CE, SOC, TTG, Alarm, Relay, AR,
 //    BMV and FW + Checksum
 // 2. Frame with H1-H18 + Checksum
@@ -96,7 +97,7 @@ logger.debug('Service started at ' +
 // bmvdata maps human readable keys to objects
 var bmvdata = deviceCache.bmvdata;
 // map's keys correspond to the keys used in the frequent 1-second-updates
-var map = deviceCache.map;
+var victronMap = deviceCache.victronMap;
 // addressCache's keys map the register's addresses to the objects
 var addressCache = deviceCache.addressCache;
 
@@ -718,7 +719,7 @@ class CommandMessageQ {
 
     constructor() {
         logger.trace('CommandMessageQ::constructor');
-        this.cmdMessageQ = [];
+        this.cmdMessageQ = new Array();
         // two subsequent messages with the same command (and possible different
         // parameters) are "compressed" into one command with the parameters of
         // the second message
@@ -735,27 +736,19 @@ class CommandMessageQ {
     }
 
     // \brief  delete element indexNo in the Q
-    // \return the cmdMessageQ[indexNo]
+    // \return the cmdMessageQ[indexNo] as array
     del(indexNo) {
         let lastCmd;
         if (indexNo >= 0 && indexNo < this.cmdMessageQ.length) {
             lastCmd = (this.cmdMessageQ.splice(indexNo, 1))[0]; // finished work on this message - dump
             logger.debug(':' + lastCmd.getMessage() + '\\n processed - dequeing');
         }
-        logger.debug('Cmd Q: ' + this.cmdMessageQ.length);
         return lastCmd;
     }
 
     find(responseId) {
-        let cmdQIndex;
-        for (cmdQIndex = 0; cmdQIndex < this.cmdMessageQ.length; ++cmdQIndex)
-        {
-            if (responseId === this.cmdMessageQ[cmdQIndex].getId())
-            {
-                break; // jump out of the loop without increasing i
-            }
-        }
-        if (cmdQIndex === this.cmdMessageQ.length)
+        const cmdQIndex = this.cmdMessageQ.findIndex((element) => element.getId() === responseId);
+        if (cmdQIndex < 0 || cmdQIndex >= this.cmdMessageQ.length)
         {
             logger.error('response ' + responseId +
                          ' does not map any queued command: ');
@@ -765,6 +758,7 @@ class CommandMessageQ {
                 logger.error('MessageQ is:');
                 this.cmdMessageQ.map(c => logger.error(c.getMessage()));
             }
+            cmdQIndex = this.cmdMessageQ.length;
         }
         return cmdQIndex;
     }
@@ -778,7 +772,7 @@ class CommandMessageQ {
     delete(id) {
         let retval = isOK;
         const cmdQIndex = this.find(id);
-        if (cmdQIndex === this.getQLength())
+        if (cmdQIndex >= this.getQLength())
         {
             retval = isUnknownID;
         }
@@ -793,6 +787,8 @@ class CommandMessageQ {
         let i = this.cmdMessageQ.length;
         // start the search from the end of cmdMessageQ
         while (--i > 0 && this.cmdMessageQ[i].getPriority() < priority);
+        // FIXME: i > 0!!! i.e. cmdMessageQ[0] is never tested - is that right because index 0
+        // is already sent to BMV??? - either comment or fix
         return i + 1;
     }
 
@@ -801,7 +797,7 @@ class CommandMessageQ {
     //         array. Insert message after last message with priority 1
     insertPriority(message, indexOfInsertion) {
         let i = 0;
-        let prioOneMsg = [];
+        let prioOneMsg = new Array();
         for (i = 0; i < indexOfInsertion; ++i)
         {
             prioOneMsg.push(this.cmdMessageQ.shift());
@@ -891,7 +887,7 @@ var readAppConfig = function()
             doRecord             = config.Device.doRecord;
             recordFile           = config.Device.recordFile;
         }
-	isConfigured = true;
+        isConfigured = true;
     });
 }
 
@@ -913,104 +909,96 @@ class ReceiverTransmitter {
         if (this.isRecording)
             this.recordFile = fs.createWriteStream(__dirname + '/' + recordFile, {flags: 'w'});
         else this.recordFile = null;
-        this.on = [];
+        this.on = new Array();
         this.packageArrivalTime = 0;
     }
 
     // copy the values of obj converted to SI units into changeObj
     SIValues(obj) {
-	let changeObj = {
-	    value:    obj.value    * obj.nativeToUnitFactor,
-	    newValue: obj.newValue * obj.nativeToUnitFactor
-	}
-	return changeObj;
+        return {
+            value:    obj.value    * obj.nativeToUnitFactor,
+            newValue: obj.newValue * obj.nativeToUnitFactor
+        };
     }
     
     runOnFunction(key, obj) {
         let changeObj = null;
         // value received by serial parser ==> newValue != null, only null is an indicator that
-	// object is not dirty
+        // object is not dirty
         if (obj.newValue !== null && obj.value != obj.newValue)
         {
             // send event to listeners with values
             // on() means if update applied,
 
-	    // changeObj becomes non-null only if it is a number and sufficiently different
-	    // or if it is a string, object etc.
+            // changeObj becomes non-null only if it is a number and sufficiently different
+            // or if it is a string, object etc.
             if (typeof obj.newValue === 'number') {
-		const oldValue = obj.value * obj.nativeToUnitFactor;
-		const newValue = obj.newValue * obj.nativeToUnitFactor;
-		//if (Math.abs(obj.value - obj.newValue) * obj.nativeToUnitFactor >= obj.delta)
-		if (Math.abs(oldValue - newValue) >= obj.delta)
-		{
-		    for (let i = 0; i < obj.on.length; ++i) {
-			try {
-			    // TODO+FIXME: for consistency enter SI values into .on()
-			    if (obj.on[i])
-				obj.on[i](newValue, oldValue, this.packageArrivalTime, key);
-				//obj.on[i](obj.newValue, obj.value, this.packageArrivalTime, key);
-			}
-			catch (err) {
-			    logger.error('runOnFunction(' + key + '): ' + err);
-			}
-		    }
-		    changeObj = this.SIValues(obj);
-		}
-	    }
-	    else changeObj = this.SIValues(obj);
+                const oldValue = obj.value * obj.nativeToUnitFactor;
+                const newValue = obj.newValue * obj.nativeToUnitFactor;
+                //if (Math.abs(obj.value - obj.newValue) * obj.nativeToUnitFactor >= obj.delta)
+                if (Math.abs(oldValue - newValue) >= obj.delta)
+                {
+                    for (let i = 0; i < obj.on.length; ++i) {
+                        try {
+                            if (obj.on[i])
+                                obj.on[i](newValue, oldValue, this.packageArrivalTime, key);
+                        }
+                        catch (err) {
+                            logger.error('runOnFunction(' + key + '): ' + err);
+                        }
+                    }
+                    changeObj = this.SIValues(obj);
+                }
+            }
+            else changeObj = this.SIValues(obj);
         }
         return changeObj;
     }
 
     updateCache(key) {
-	const obj = bmvdata[key];
+        let obj = bmvdata[key];
         // value received by serial parser ==> newValue != null, only null is an indicator that
-	// object is not dirty
-	if (obj.newValue !== null) obj.value = obj.newValue; // accept new values
+        // object is not dirty
+        if (obj.newValue !== null) obj.value = obj.newValue; // accept new values
         obj.newValue = null;
     }
 
     updateValuesAndValueListeners() {
         logger.trace('ReceiverTransmitter::updateValuesAndValueListeners');
         let changedObjects = new Map(); //{};
-	// go through all objects that change, i.e. those of map
-	// which are changing values of BMV but also others.
+        // go through all objects that change, i.e. those of map
+        // which are changing values of BMV but also others.
 
-	// Parse 1. go through all cached data objects and call their on() functions
-	//          so that all on() functions can rely on newValue being != null and new
-	//          and value is the previous value
-
+        // Parse 1. go through all cached data objects and call their on() functions
+        //          so that all on() functions can rely on newValue being != null and new
+        //          and value is the previous value
         for (const[key, obj] of Object.entries(bmvdata)) {
-	    const change = this.runOnFunction(key, obj);
-            //if (change) changedObjects[key] = change;
+            const change = this.runOnFunction(key, obj);
             if (change) changedObjects.set(key, change);
         }
-	for (let i = 0; i < this.on.length; ++i) {
-	    try {
-		if (this.on[i] && changedObjects.size)
-		    this.on[i](changedObjects, this.packageArrivalTime);
-	    }
-	    catch (err) {
-		//FIXME: TypeError: Cannot read property 'newValue' of undefined
-		logger.error('updateValuesAndValueListeners: ' + err);
-		logger.error('      i: ' + i);
-		logger.error('      f: ' + this.on[i]);
-		logger.error('      ' + JSON.stringify(changedObjects));
-	    }
-	}
+        if (changedObjects.size)
+            for (let i = 0; i < this.on.length; ++i) {
+                try {
+                    if (this.on[i] && changedObjects.size)
+                        this.on[i](changedObjects, this.packageArrivalTime);
+                }
+                catch (err) {
+                    logger.error('updateValuesAndValueListeners: ' + err);
+                }
+            }
 
-	// Parse 2. go through all cached data objects and update value with newValue
-	//          and set newValue = null.
+        // Parse 2. go through all cached data objects and update value with newValue
+        //          and set newValue = null.
         for (const[key, obj] of Object.entries(bmvdata)) {
-	    this.updateCache(key);
-	}
+            if (obj) this.updateCache(key);
+        }
     }
 
     discardValues() {
         logger.trace('ReceiverTransmitter::discardValues');
-	// do not discard all cached entries but only those
-	// that relate to the checksum, i.e. that appear in map
-        for (const [key, obj] of Object.entries(map)) {
+        // do not discard all cached entries but only those
+        // that relate to the checksum, i.e. that appear in victronMap
+        for (let obj of victronMap.values()) {
             obj.newValue = null; // dump new values
         } 
     }
@@ -1028,10 +1016,10 @@ class ReceiverTransmitter {
     deregisterListener(listener)
     {
         logger.trace('ReceiverTransmitter::deregisterListener');
-	if (! listener) return;
-	const i = this.on.findIndex((element) => element === listener);
-	if (i < 0 || i >= this.on.length) return;
-	this.on.splice(i, 1);
+        if (! listener) return;
+        const i = this.on.findIndex((element) => element === listener);
+        if (i < 0 || i >= this.on.length) return;
+        this.on.splice(i, 1);
     }
 
     evaluate(response) {
@@ -1047,16 +1035,16 @@ class ReceiverTransmitter {
         } 
         else if (id in this.responseMap)
         {
-	    // FIXME: clear timeout only if 'Device DOES NOT refuse to set expected value'
+            // FIXME: clear timeout only if 'Device DOES NOT refuse to set expected value'
             clearTimeout(this.responseMap[id].timerId)
             logger.debug(id + ' in responseMap ==> clear timeout');
             // logger.errors are for finding conv.hexToInt issue (to be removed)
             if (this.responseMap[id].expect
                 !== response.getMessage().substring(0, this.responseMap[id].expect.length)) {
-		// FIXME: do we still see this with setRelay??? or elsewhere
+                // FIXME: do we still see this with setRelay??? or elsewhere
                 logger.error('Device refused to set expected value: ' +
-			     this.responseMap[id].expect + '; received: ' +
-			     response.getMessage().substring(0, this.responseMap[id].expect.length));
+                             this.responseMap[id].expect + '; received: ' +
+                             response.getMessage().substring(0, this.responseMap[id].expect.length));
             }
             else { // process response and remove it from Q and responseMap
                 switch (this.responseMap[id].func(response)) {
@@ -1099,48 +1087,48 @@ class ReceiverTransmitter {
     }
 
     start() {
-	console.log("starting")
-	try {
-	    this.open(serialportFile);
-	}
-	catch (err) {
-	    console.log(err);
-	}
+        console.log("starting")
+        try {
+            this.open(serialportFile);
+        }
+        catch (err) {
+            console.log(err);
+        }
     }
 
     open(ve_port) {
-	if (! isConfigured ) {
-	    console.log("waiting");
-	    setTimeout(function() {
-		try {
-		    this.start();
-		}
-		catch(err) {
-		    console.log(err);
-		}
-	    }.bind(this), 2000);
-	    return;
-	}
-	console.log("success");
+        if (! isConfigured ) {
+            console.log("waiting");
+            setTimeout(function() {
+                try {
+                    this.start();
+                }
+                catch(err) {
+                    console.log(err);
+                }
+            }.bind(this), 2000);
+            return;
+        }
+        console.log("success");
         logger.trace('ReceiverTransmitter::open(.)');
-	try {
+        try {
             this.port =  new serialport(ve_port, {
-		baudRate: 19200 });
-	    const delimiterParser = new Delimiter({ delimiter: '\r\n' });
-	    this.port.pipe(delimiterParser);
-	    delimiterParser.on('data', function(data) {
-		let line = data.toString('binary');
-		this.isOperational = true;
-		if (this.isRecording)
-		{
+                baudRate: 19200 });
+            const delimiterParser = new Delimiter({ delimiter: '\r\n' });
+            this.port.pipe(delimiterParser);
+            delimiterParser.on('data', function(data) {
+                let line = data.toString('binary');
+                if (this.isRecording)
+                {
                     this.recordFile.write(line + '\r\n');
-		}
-		this.parseSerialInput(line);
+                }
+                this.parseSerialInput(line);
             }.bind(this));
-	}
-	catch (err) {
-	    console.log(err);
-	}
+        }
+        catch (err) {
+            console.log(err);
+            throw '';
+        }
 
     }
 
@@ -1152,6 +1140,11 @@ class ReceiverTransmitter {
 
     parseSerialInput(line) {
         logger.trace('ReceiverTransmitter::parseSerialInput');
+
+        if (!this.isOperational) {
+            this.isOperational = true;
+            return; // ignore first package because most times it is incomplete
+        }
         // a line contains a key value pair separated by tab:
         let res = line.split('\t');
         // res[0] is the key, res[1] the value
@@ -1240,17 +1233,19 @@ class ReceiverTransmitter {
             // the "tab" is consumed by the split command at the top of this function
             this.checksum.update(line);
             if (this.packageArrivalTime === 0) this.packageArrivalTime = Date.now();
-            if (res[0] in map && map[res[0]] !== undefined) {
-		// all values res[1] come in as integer values, with three exceptions:
-		// PID is a hex number, e.g. "0x204"
-		// Alarm and Relay are "ON" or "OFF"
-		const newValue = parseInt(res[1]); // converts string to int, Alarm/Relay to NaN
-		// PID now is converted to decimal
-		if (!newValue) // i.e. Alarm and Relay
-		    map[res[0]].newValue = res[1]; // typeof newValue = 'string'
-		else
-		    map[res[0]].newValue = newValue; // typeof newValue = 'number'
-	    }
+            if (!victronMap.has(res[0]))
+                deviceCache.registerComponent(res[0]);
+            if (victronMap.has(res[0]) && victronMap.get(res[0]) !== undefined) {
+                // all values res[1] come in as integer values, with three exceptions:
+                // PID is a hex number, e.g. "0x204"
+                // Alarm and Relay are "ON" or "OFF"
+                const newValue = parseInt(res[1]); // converts string to int, Alarm/Relay to NaN
+                // PID now is converted to decimal
+                if (!newValue) // i.e. Alarm and Relay
+                    victronMap.get(res[0]).newValue = res[1]; // typeof newValue = 'string'
+                else
+                    victronMap.get(res[0]).newValue = newValue; // typeof newValue = 'number'
+            }
             else logger.warn('parseSerialInput: ' + res[0]
                              + ' is not registered and has value ' + res[1]);
         }
@@ -1277,8 +1272,8 @@ class ReceiverTransmitter {
             // const address = "0x" + nextCmd.substring(4, 6) + nextCmd.substring(2, 4);
             // const value = nextCmd.substring(6, nextCmd.length-2);
             // // TODO: endianian value
-            // if (addressCache[address].value ==
-            //  addressCache[address].fromHexStr(strValue)) // FIXME: does convert do the job?
+            // if (addressCache.get(address).value ==
+            //  addressCache.get(address).fromHexStr(strValue)) // FIXME: does convert do the job?
             // {
             //  logger.debug("Cached value same as command value - ignoring");
             //  return;
@@ -1408,7 +1403,7 @@ class ReceiverTransmitter {
             if (commandId === productIdCommand) {
                 bmvdata.productId.newValue = value;
                 this.runOnFunction('productId', bmvdata.productId); // ignore returned object
-		this.updateCache('productId');
+                this.updateCache('productId');
                 logger.debug('Product Id response: '
                              + bmvdata.productId.shortDescr + ' '
                              + bmvdata.productId.formatted() + ' - cache updated');
@@ -1417,7 +1412,7 @@ class ReceiverTransmitter {
                 const releaseCandidate = value.charAt(0);
                 bmvdata.version.newValue = value.substring(1);
                 this.runOnFunction('version', bmvdata.version); // ignore returned object
-		this.updateCache('version');
+                this.updateCache('version');
                 logger.debug('Ping/Version response: '
                              + bmvdata.version.shortDescr + ' ' + bmvdata.version.formatted()
                              + ' release candidate ' + releaseCandidate + ' - cache updated');
@@ -1432,21 +1427,22 @@ class ReceiverTransmitter {
             }
             if (errStatus === isOK) {
                 const address = '0x' + response.getAddress();
-                if (address in addressCache)
+                if (addressCache.has(address))
                 {
                     // TODO: add sentTime, receivedTime fields to each object
-                    addressCache[address].newValue = addressCache[address].fromHexStr(response.getValue());
+                    addressCache.get(address).newValue = addressCache.get(address).fromHexStr(response.getValue());
                     logger.debug('response for ' + address + ': updating cache');
                     // FIXME: addressCache must point to the bmvdata keys!!!
-                    // i.e. here runOnFunction(bmvdata[addressCache[address]]...
-                    //this.runOnFunction('FIXME:', addressCache[address]); // ignore returned object
-		    //this.updateCache('FIXME:');
+                    // i.e. here runOnFunction(bmvdata[addressCache.get(address)]...
+                    //this.runOnFunction('FIXME:', addressCache.get(address)); // ignore returned object
+                    //this.updateCache('FIXME:');
+                    this.updateValuesAndValueListeners();
                 }
                 else {
                     logger.warn(address + ' is not in addressCache');
                     // FIXME: the creation of a new object? Does it make sense?
-                    //addressCache[address] = new Object();
-                    //addressCache[address].newValue = conv.hexToUint(strValue);
+                    //addressCache.set(address, new Object());
+                    //addressCache.get(address).newValue = conv.hexToUint(strValue);
                 }
             }
             //TODO: if response does not match expected response sendMsg(message, priority) again.
@@ -1920,7 +1916,7 @@ class VictronEnergyDevice {
     set_relay_mode(mode, priority, force) {
         logger.trace('VictronEnergyDevice::set relay mode');
 
-        if (Math.floor(parseInt(addressCache['0x034F'].value)) === mode) return;
+        if (Math.floor(parseInt(addressCache.get('0x034F').value)) === mode) return;
         
         // FIXME: set priority 1 (bug: currently not working)
         if (mode === 0)
@@ -1944,8 +1940,8 @@ class VictronEnergyDevice {
         this.set_relay_mode(2, priority, force);
 
         let currentMode = 0;
-        if (addressCache['0x034E'].value === 'ON') currentMode = 1;
-        if (addressCache['0x034E'].value !== null && currentMode === mode) return;
+        if (addressCache.get('0x034E').value === 'ON') currentMode = 1;
+        if (addressCache.get('0x034E').value !== null && currentMode === mode) return;
 
         // FIXME: set priority 1 (bug: currently not working)
         if (mode === 0)
@@ -2021,7 +2017,7 @@ class VictronEnergyDevice {
     // \see   device_cache.js: function register(.) property formatted
     registerListener(property, listener)
     {
-	if (! property || ! listener) return;
+        if (! property || ! listener) return;
         logger.trace('VictronEnergyDevice::registerListener(' + property + ')');
         if (property === 'ChangeList') this.rxtx.registerListener(listener);
         else if (property in bmvdata) {
@@ -2036,13 +2032,13 @@ class VictronEnergyDevice {
     
     deregisterListener(property, listener)
     {
-	if (! property || ! listener) return;
+        if (! property || ! listener) return;
         logger.trace('VictronEnergyDevice::deregisterListener(' + property + ')');
         if (property === 'ChangeList') this.rxtx.deregisterListener(listener);
         else if (property in bmvdata) {
-	    const i = bmvdata[property].on.findIndex((element) => element === listener);
-	    if (i < 0 || i >= this.on.length) return;
-	    bmvdata[property].on.splice(i, 1);
+            const i = bmvdata[property].on.findIndex((element) => element === listener);
+            if (i < 0 || i >= this.on.length) return;
+            bmvdata[property].on.splice(i, 1);
         }
     }
     
@@ -2060,7 +2056,11 @@ class VictronEnergyDevice {
 
     createObject(nativeToUnitFactor, units, shortDescr, options) {
         logger.trace('VictronEnergyDevice::createObject');
-        return deviceCache.createObject(nativeToUnitFactor, units, shortDescr, options);
+        return new CacheObject(nativeToUnitFactor, units, shortDescr, options);
+    }
+
+    registerComponent(key) {
+        deviceCache.registerComponent(key);
     }
 }
 
