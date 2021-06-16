@@ -285,393 +285,9 @@ class CacheObject {
     };
 }
 
-function mapComponents() {
-    logger.trace("Registering");
-    // component:  your given name
-    // n2UF:       nativeToUnitFactor (output value = n2UF * BMV_value)
-    // units:      Ampere, Volts etc. the units must fit the n2UF 
-    // shortDescr: used as label for the value
-    // options:    list of key values, known keys: precision, description, formatter
-    //             precision: negative: -n; round to n digits right to the decimal separator
-    //                        zero:      0; round to integer
-    //                        positive: +n; round to the n-th digit left from decimal separator
-    //                        default:  -2; round to 2 digits right to the decimal separator
-    //
-    // Each registration line is as follows:
-    // bmvdata.<component> = new CacheObject(<n2UF>, <units>, <shortDescr>, <options>);
-
-    // Monitored values:
-    // BMV600, BMV700, Phoenix Inverter
-    bmvdata.alarmReason         = new CacheObject(1,      "",    "Alarm reason",
-                                           {'precision': 0, 'formatter' : function() 
-    {
-        return this.getAlarmText(this.value);
-    }});
-    // the key of the map is a string identifier that comes with the value sent by BMV
-    victronMap.set('AR', bmvdata.alarmReason);
-    
-    // BMV600, BMV700, MPPT - Type Sn16; Unit: 0.1A!!!
-    // On BMV-712 >v4.01 and BMV-70x >v3.09: Type: Sn32; Unit: 0.001A
-    bmvdata.batteryCurrent      = new CacheObject(0.001,  "A",   "Battery Current",
-                                           {'fromHexStr': (hex) => { return 100 * conv.hexToSint(hex); } });
-    victronMap.set('I', bmvdata.batteryCurrent);
-    addressCache.set('0xED8F', bmvdata.batteryCurrent);
-    // only on BMV-712 > v4.01 and BMV-70x > v3.09: is might be address '0xED8C'
-
-    // MPPT
-    bmvdata.loadCurrent         = new CacheObject(0.001,  "A",   "Load Current");
-    victronMap.set('IL', bmvdata.loadCurrent);
-    // MPPT - returns string 'ON' or 'OFF'
-    bmvdata.load                = new CacheObject(0,      "",    "Load Output State",
-                                           { 'fromHexStr': conv.hexToOnOff });
-    victronMap.set('LOAD', bmvdata.load);
-
-    // BMV600, BMV700, MPPT, Phoenix Inverter - Display: MAIN; Type: Sn16; Unit: 0.01V!!!
-    bmvdata.upperVoltage        = new CacheObject(0.001,  "V",   "Main Voltage",
-                                           { 'description': "Main (Battery) Voltage",
-                                             'precision': -1,
-                                             'fromHexStr': (hex) => { return 10 * conv.hexToSint(hex); }});
-    victronMap.set('V', bmvdata.upperVoltage);
-    addressCache.set('0xED8D', bmvdata.upperVoltage);
-
-    // BMV700 - Display: MID; Type: Un16; Units: 0.01V!!! (only BMV-702 and BMV-712)
-    bmvdata.midVoltage          = new CacheObject(0.001,  "V",   "Mid Voltage",
-                                           { 'description': "Mid-point Voltage of the Battery Bank",
-                                             'precision': -1,
-                                             'fromHexStr': (hex) => { return 10 * conv.hexToSint(hex); }});
-    // only on BMV-702 and BMV-712
-    victronMap.set('VM', bmvdata.midVoltage);
-    addressCache.set('0x0382', bmvdata.midVoltage);
-
-    // BMV700 - Type: Un16; Unit: 0.01 K!!!
-    bmvdata.batteryTemp         = new CacheObject(1.0,    "°C",  "Battery Temperature");
-    // only on BMV-702 and BMV-712
-    victronMap.set('T', bmvdata.batteryTemp);
-    addressCache.set('0xEDEC', bmvdata.batteryTemp);
-
-    // BMV700 - Type: Sn16; Unit: W
-    bmvdata.instantPower        = new CacheObject(1.0,    "W",   "Instantaneous Power",
-                                           {'fromHexStr': conv.hexToSint });
-    victronMap.set('P', bmvdata.instantPower);
-    addressCache.set('0xED8E', bmvdata.instantPower);
-
-    // BMV600, BMV700 - Type: Un16; Unit: 0.01%!!! for 0x0FFF
-    //                  Type: Un8 for 0xEEB6 ??? (Synchronisation State)
-    bmvdata.stateOfCharge       = new CacheObject(0.1,    "%",   "State of charge",
-                                           { 'precision': -1,
-                                             'fromHexStr' : (hex) => { return 0.1 * conv.hexToUint(hex); } });
-    victronMap.set('SOC', bmvdata.stateOfCharge);
-    addressCache.set('0x0FFF', bmvdata.stateOfCharge); // tested 
-    //addressCache.set('0xEEB6', bmvdata.stateOfCharge); // FIXME: what is this really?
-
-    // BMV600, BMV700 - Display: AUX; Type: Sn16; Unit: 0.01V!!! (not available on BMV-702 and BMV-712)
-    bmvdata.auxVolt             = new CacheObject(0.001,  "V",   "Aux. Voltage",
-                                           { 'precision': -1, 'description': "Auxiliary (starter) Voltage",
-                                             'fromHexStr': (hex) => { return 10 * conv.hexToSint(hex); }});
-    // only on BMV-702 and BMV-712
-    victronMap.set('VS', bmvdata.auxVolt);
-    addressCache.set('0xED7D', bmvdata.auxVolt);
-
-    // BMV600, BMV700 - Type: Sn32; Unit: 0.1 Ah!!!
-    bmvdata.consumedAh          = new CacheObject(0.001,  "Ah",  "Consumed",
-                                           { 'description': "Consumed Ampere Hours",
-                                             'fromHexStr': (hex) => { return 100 * conv.hexToSint(hex); } });
-    victronMap.set('CE', bmvdata.consumedAh);
-    addressCache.set('0xEEFF', bmvdata.consumedAh);
-
-    // BMV700 - Display: MID; Type: Sn16; Units: 0.1 %
-    bmvdata.midDeviation        = new CacheObject(1.0,    "%",   "Mid Deviation",
-                                           { 'description': "Mid-point Deviation of the Battery Bank",
-                                             'fromHexStr' : conv.hexToSint });
-    // only on BMV-702 and BMV-712
-    victronMap.set('DM', bmvdata.midDeviation);
-    addressCache.set('0x0383', bmvdata.midDeviation);
-
-    // MPPT
-    bmvdata.panelVoltage        = new CacheObject(0.001,  "V",   "Panel Voltage");
-    victronMap.set('VPV', bmvdata.panelVoltage);
-    // MPPT
-    bmvdata.panelPower          = new CacheObject(1.0,    "W",   "Panel Power");
-    victronMap.set('PPV', bmvdata.panelPower);
-    // MPPT, Phoenix Inverter
-    bmvdata.stateOfOperation    = new CacheObject(0,      "",    "State of Operation", {'formatter' : function() 
-    {
-        return this.getStateOfOperationText(this.value);
-    }});
-    victronMap.set('CS', bmvdata.stateOfOperation);
-    // BMV700, MPPT, Phoenix Inverter
-    bmvdata.productId           = new CacheObject(0,      "",    "Product ID", {'formatter' : function() 
-    {
-        return this.getProductLongname(this.value);
-    }});
-    victronMap.set('PID', bmvdata.productId);
-    // BMV600, BMV700, MPPT, Phoenix Inverter
-    bmvdata.version             = new CacheObject(0.01,  "",     "Firmware version");
-    victronMap.set('FW', bmvdata.version);
-
-    // History values
-    // BMV600, BMV700
-    bmvdata.deepestDischarge    = new CacheObject(0.001, "Ah",   "Deepest Discharge",
-                                           { 'precision': -2, 'description': "Depth of deepest discharge",
-                                             'fromHexStr' : (hex) => { return 100 * conv.hexToSint(hex); } });
-    victronMap.set('H1', bmvdata.deepestDischarge);
-    addressCache.set('0x0300', bmvdata.deepestDischarge);
-
-    // BMV600, BMV700
-    bmvdata.maxAHsinceLastSync  = new CacheObject(0.001, "Ah",   "Last Discharge",
-                                           { 'precision': 0, 'description': "Depth of last discharge", // Max Discharge since sync
-                                             'fromHexStr': (hex) => { return 100 * conv.hexToSint(hex); } });
-    victronMap.set('H2', bmvdata.maxAHsinceLastSync);
-    addressCache.set('0x0301', bmvdata.maxAHsinceLastSync);
-
-    // BMV600, BMV700
-    bmvdata.avgDischarge        = new CacheObject(0.001, "Ah",   "Avg. Discharge",
-                                           { 'description': "Depth of average discharge",
-                                             'fromHexStr' : (hex) => { return 100 * conv.hexToSint(hex); }});
-    victronMap.set('H3', bmvdata.avgDischarge);
-    addressCache.set('0x0302', bmvdata.avgDischarge);
-
-    // BMV600, BMV700
-    bmvdata.chargeCycles        = new CacheObject(1.0,   "",     "Charge Cycles",
-                                           { 'description': "Number of charge cycles" });
-    victronMap.set('H4', bmvdata.chargeCycles);
-    addressCache.set('0x0303', bmvdata.chargeCycles);
-
-    // BMV600, BMV700
-    bmvdata.fullDischarges      = new CacheObject(1.0,   "",     "Full Discharges",
-                                           { 'description': "Number of full discharges" });
-    victronMap.set('H5', bmvdata.fullDischarges);
-    addressCache.set('0x0304', bmvdata.fullDischarges);
-
-    // BMV600, BMV700
-    bmvdata.drawnAh             = new CacheObject(0.001, "Ah",   "Cum. Ah drawn",
-                                           { 'fromHexStr': (hex) => { return 100 * conv.hexToSint(hex); }});
-    victronMap.set('H6', bmvdata.drawnAh);
-    addressCache.set('0x0305', bmvdata.drawnAh);
-
-    // BMV600, BMV700
-    bmvdata.minVoltage          = new CacheObject(0.001, "V",    "Min. Voltage",
-                                           { 'description': "Minimum Main (Battery) Voltage",
-                                             'fromHexStr': (hex) => { return 10 * conv.hexToSint(hex); }});
-    victronMap.set('H7', bmvdata.minVoltage);
-    addressCache.set('0x0306', bmvdata.minVoltage);
-
-    // BMV600, BMV700
-    bmvdata.maxVoltage          = new CacheObject(0.001, "V",    "Max. Voltage",
-                                           { 'description': "Maximum Main (Battery) Voltage",
-                                             'fromHexStr': (hex) => { return 10 * conv.hexToSint(hex); }});
-    victronMap.set('H8', bmvdata.maxVoltage);
-    addressCache.set('0x0307', bmvdata.maxVoltage);
-
-    // BMV600, BMV700
-    bmvdata.timeSinceFullCharge = new CacheObject(1.0,   "s",    "Time since Full Charge",
-                                           { 'description': "Number of seconds since full charge" });
-    victronMap.set('H9', bmvdata.timeSinceFullCharge);
-    addressCache.set('0x0308', bmvdata.timeSinceFullCharge);
-
-    // BMV600, BMV700
-    bmvdata.noAutoSyncs         = new CacheObject(1,     "",     "Auto. Syncs",
-                                           { 'description': "Number of automatic synchronisations" });
-    victronMap.set('H10', bmvdata.noAutoSyncs);
-    addressCache.set('0x0309',  bmvdata.noAutoSyncs);
-
-    // BMV600, BMV700
-    bmvdata.lowVoltageAlarms    = new CacheObject(1,     "",     "Low Volt. Alarms",
-                                           { 'description': "Number of Low Main Voltage Alarms" });
-    victronMap.set('H11', bmvdata.lowVoltageAlarms);
-    addressCache.set('0x030A', bmvdata.lowVoltageAlarms);
-
-    // BMV600, BMV700
-    bmvdata.highVoltageAlarms   = new CacheObject(1,     "",     "High Volt. Alarms",
-                                           { 'description': "Number of High Main Voltage Alarms" });
-    victronMap.set('H12', bmvdata.highVoltageAlarms);
-    addressCache.set('0x030B', bmvdata.highVoltageAlarms);
-
-    // BMV600
-    bmvdata.lowAuxVoltageAlarms = new CacheObject(1,     "",     "Low Aux. Volt. Alarms",
-                                           { 'description': "Number of Low Auxiliary Voltage Alarms" });
-    victronMap.set('H13', bmvdata.lowAuxVoltageAlarms);
-
-    // BMV600
-    bmvdata.highAuxVoltageAlarms= new CacheObject(1,     "",     "High Aux. Volt. Alarms",
-                                           { 'description': "Number of High Aux. Voltage Alarms" });
-    victronMap.set('H14', bmvdata.highAuxVoltageAlarms);
-    
-    // BMV600, BMV700
-    bmvdata.minAuxVoltage       = new CacheObject(0.001, "V",    "Min. Aux. Volt.",
-                                           { 'description': "Minimal Auxiliary (Battery) Voltage",
-                                             'fromHexStr': (hex) => { return 10 * conv.hexToSint(hex); }});
-    victronMap.set('H15', bmvdata.minAuxVoltage);
-    addressCache.set('0x030E', bmvdata.minAuxVoltage);
-
-    // BMV600, BMV700
-    bmvdata.maxAuxVoltage       = new CacheObject(0.001, "V",    "Max. Aux. Volt.",
-                                           { 'description': "Maximal Auxiliary (Battery) Voltage",
-                                             'fromHexStr': (hex) => { return 10 * conv.hexToSint(hex); }});
-    victronMap.set('H16', bmvdata.maxAuxVoltage);
-    addressCache.set('0x030F', bmvdata.maxAuxVoltage);
-
-    // BMV700
-    bmvdata.dischargeEnergy     = new CacheObject(0.01,  "kWh",  "Drawn Energy",
-                                           { 'description': "Amount of Discharged Energy" });
-    victronMap.set('H17', bmvdata.dischargeEnergy);
-    addressCache.set('0x0310', bmvdata.dischargeEnergy);
-
-    // BMV700
-    bmvdata.absorbedEnergy      = new CacheObject(0.01,  "kWh",  "Absorbed Energy",
-                                           { 'description': "Amount of Charged Energy" });
-    victronMap.set('H18', bmvdata.absorbedEnergy);
-    addressCache.set('0x0311', bmvdata.absorbedEnergy);
-
-    // MPPT
-    bmvdata.yieldTotal          = new CacheObject(0.01,  "kWh",  "Yield Total",
-                                           { 'description': "User resettable counter" });
-    victronMap.set('H19', bmvdata.yieldTotal);
-    // MPPT
-    bmvdata.yieldToday          = new CacheObject(0.01,  "kWh",  "Yield Today");
-    victronMap.set('H20', bmvdata.yieldToday);
-    // MPPT
-    bmvdata.maxPowerToday       = new CacheObject(1.0,   "W",    "Max. Power Today");
-    victronMap.set('H21', bmvdata.maxPowerToday);
-    
-    // MPPT
-    bmvdata.yieldYesterday      = new CacheObject(0.01,  "kWh",  "Yield Yesterday");
-    victronMap.set('H22', bmvdata.yieldYesterday);
-    
-    // MPPT
-    bmvdata.maxPowerYesterday   = new CacheObject(1.0,   "W",    "Max. Power Yesterday");
-    victronMap.set('H23', bmvdata.maxPowerYesterday);
-    
-    // MPPT
-    bmvdata.errorCode           = new CacheObject(1,     "",     "MPPT Error Code", {'formatter' : function() 
-    {
-        return this.getErrorText(this.value);
-    }});
-    victronMap.set('ERR', bmvdata.errorCode);
-
-    // Phoenix Inverter
-    bmvdata.warnReason          = new CacheObject(0,     "",     "Warning Reason");
-    victronMap.set('WARN', bmvdata.warnReason);
-    // MPPT, Phoenix Inverter
-    bmvdata.serialNumber        = new CacheObject(0,     "",     "Serial Number");
-    victronMap.set('SER#', bmvdata.serialNumber);
-    // BlueSolar MPPT - returns 0WARNWARNWARN..364
-    bmvdata.daySequenceNumber   = new CacheObject(1,     "",     "Day Sequence Number");
-    victronMap.set('HSDS', bmvdata.daySequenceNumber);
-    // Phoenix Inverter
-    bmvdata.deviceMode          = new CacheObject(1,     "",     "Device Mode", {'formatter' : function() 
-    {
-        return this.getDeviceModeText(this.value);
-    }});
-    victronMap.set('MODE', bmvdata.deviceMode);
-
-    // Phoenix Inverter
-    bmvdata.ACoutVoltage        = new CacheObject(0.01,"V",    "AC Output Voltage");
-    victronMap.set('AC_OUT_V', bmvdata.ACoutVoltage);
-    // Phoenix Inverter
-    bmvdata.ACoutCurrent        = new CacheObject(0.1, "A",    "AC Output Current");
-    victronMap.set('AC_OUT_I', bmvdata.ACoutVoltage);
-
-    // BMV600, BMV700 - Type: Un16; Units: minutes
-    bmvdata.timeToGo            = new CacheObject(60.0,  "s",    "Time to go",
-                                           {'description': "Time until discharged" });
-    victronMap.set('TTG', bmvdata.timeToGo);
-    addressCache.set('0x0FFE', bmvdata.timeToGo);
-
-    // BMV600, BMV700 - returns string 'ON' or 'OFF'
-    bmvdata.alarmState          = new CacheObject(0,   "",       "Alarm state",
-                                           {'description': "Alarm condition active",
-                                            'fromHexStr': conv.hexToOnOff
-                                           });
-    victronMap.set('Alarm', bmvdata.alarmState);
-
-    addressCache.set('0xEEFC', bmvdata.alarmReason);
-
-    // BMV600, BMV700, SmartSolar MPPT - returns string 'ON' or 'OFF'
-    bmvdata.relayState          = new CacheObject(0,   "",       "Relay state",
-                                           { 'fromHexStr': conv.hexToOnOff
-                                           });
-    victronMap.set('Relay', bmvdata.relayState);
-    // FIXME: how does this value behave with the inversion of the relay?
-    addressCache.set('0x034E', bmvdata.relayState);
-
-    bmvdata.relayMode           = new CacheObject(1,   "",       "Relay mode");
-    victronMap.set('RelayMode', bmvdata.relayMode);
-    addressCache.set('0x034F', bmvdata.relayMode);
-
-    // BMV600, BMV700
-    bmvdata.modelDescription    = new CacheObject(0,   "",       "Model Description");
-    victronMap.set('BMV', bmvdata.modelDescription);
-
-    // FIXME: the following keys 'Cap', 'CV', 'TC' etc do not exist in the
-    //        frequent updates...
-    // Battery settings: all of Type Un16 except UserCurrentZero
-    bmvdata.capacity            = new CacheObject(1,   "Ah",     "Battery capacity");
-    addressCache.set('0x1000', bmvdata.capacity);
-
-    bmvdata.chargedVoltage      = new CacheObject(0.1,   "V",      "Charged voltage");
-    addressCache.set('0x1001', bmvdata.chargedVoltage);
-
-    bmvdata.tailCurrent         = new CacheObject(0.1,   "%",      "Tail current");
-    addressCache.set('0x1002', bmvdata.tailCurrent);
-
-    bmvdata.chargedDetectTime   = new CacheObject(1,   "min",    "Charged detection time");
-    addressCache.set('0x1003', bmvdata.chargedDetectTime);
-
-    bmvdata.chargeEfficiency    = new CacheObject(1,   "%",      "Charge efficiency");
-    addressCache.set('0x1004', bmvdata.chargeEfficiency);
-
-    bmvdata.peukertCoefficient  = new CacheObject(0.01,   "",      "Peukert coefficiency");
-    addressCache.set('0x1005', bmvdata.peukertCoefficient);
-
-    bmvdata.currentThreshold    = new CacheObject(0.01,    "A",     "Current threshold");
-    addressCache.set('0x1006', bmvdata.currentThreshold);
-
-    bmvdata.timeToGoDelta       = new CacheObject(1,    "min",   "Time to go Delta T");
-    addressCache.set('0x1007', bmvdata.timeToGoDelta);
-
-    bmvdata.relayLowSOC         = new CacheObject(0.1,    "%",     "Relay low SOC");
-    addressCache.set('0x1008', bmvdata.relayLowSOC);
-
-    bmvdata.relayLowSOCClear    = new CacheObject(0.1,"%",    "Relay low SOC clear");
-
-    // UCZ is of Type: Sn16; Read-Only
-    addressCache.set('0x1009', bmvdata.relayLowSOCClear);
-
-    bmvdata.userCurrentZero     = new CacheObject(1,    "",      "User current zero",
-                                           { 'fromHexStr': conv.hexToSint });
-    addressCache.set('0x1034', bmvdata.userCurrentZero);
-
-    // Show/don't show certain parameters on BMV
-    bmvdata.showVoltage         = new CacheObject(1,   "",       "Show voltage");
-    addressCache.set('0xEEE0', bmvdata.showVoltage);
-
-    bmvdata.showAuxVoltage      = new CacheObject(1,   "",       "Show auxiliary voltage");
-    addressCache.set('0xEEE1', bmvdata.showAuxVoltage);
-
-    bmvdata.showMidVoltage      = new CacheObject(1,   "",       "Show mid voltage");
-    addressCache.set('0xEEE2', bmvdata.showMidVoltage);
-
-    bmvdata.showCurrent         = new CacheObject(1,   "",       "Show current");
-    addressCache.set('0xEEE3', bmvdata.showCurrent);
-
-    bmvdata.showConsumedAH      = new CacheObject(1,   "",       "Show consumed AH");
-    addressCache.set('0xEEE4', bmvdata.showConsumedAH);
-
-    bmvdata.showSOC             = new CacheObject(1,   "",       "Show SOC");
-    addressCache.set('0xEEE5', bmvdata.showSOC);
-
-    bmvdata.showTimeToGo        = new CacheObject(1,   "",       "Show time to go");
-    addressCache.set('0xEEE6', bmvdata.showTimeToGo);
-
-    bmvdata.showTemperature     = new CacheObject(1,   "",       "Show temperature");
-    addressCache.set('0xEEE7', bmvdata.showTemperature);
-
-    bmvdata.showPower           = new CacheObject(1,   "",       "Show power");
-    addressCache.set('0xEEE8', bmvdata.showPower);
-
-};
-
+// For dynamical registration of objects as they come in from the Victron unit.
+// Dynamical registration saves about 50 objects when operating with BMV-702
+// (34 instead of all 84 objects).
 function registerComponent(key) {
     logger.trace("registerComponent(" + key + ")");
     // component:  your given name
@@ -825,10 +441,12 @@ function registerComponent(key) {
 
     case 'PID':
         // BMV700, MPPT, Phoenix Inverter
-        bmvdata.productId           = new CacheObject(0,      "",    "Product ID", {'formatter' : function() 
-                                                                                    {
-                                                                                        return this.getProductLongname(this.value);
-                                                                                    }});
+        bmvdata.productId           = new CacheObject(0,      "",    "Product ID",
+						      {'formatter' : function() 
+                                                       {
+							   //if (bmvdata.productId.value === parseInt("0x204" )) mapBMVComponents();
+							   return this.getProductLongname(this.value);
+                                                       }});
         victronMap.set('PID', bmvdata.productId);
         break;
 
@@ -1096,12 +714,6 @@ function registerComponent(key) {
         addressCache.set('0x034E', bmvdata.relayState);
         break;
 
-    case 'RelayMode':
-        bmvdata.relayMode           = new CacheObject(1,   "",       "Relay mode");
-        victronMap.set('RelayMode', bmvdata.relayMode);
-        addressCache.set('0x034F', bmvdata.relayMode);
-        break;
-
     case 'BMV':
         // BMV600, BMV700
         bmvdata.modelDescription    = new CacheObject(0,   "",       "Model Description");
@@ -1119,7 +731,7 @@ function registerComponent(key) {
 
 // creates and maps those components that are not covered by the frequent
 // updates coming from the device
-function mapComponentsNew() {
+function mapBMVComponents() {
     // Battery settings: all of Type Un16 except UserCurrentZero
     bmvdata.capacity            = new CacheObject(1,   "Ah",     "Battery capacity");
     addressCache.set('0x1000', bmvdata.capacity);
@@ -1156,6 +768,9 @@ function mapComponentsNew() {
                                            { 'fromHexStr': conv.hexToSint });
     addressCache.set('0x1034', bmvdata.userCurrentZero);
 
+    bmvdata.relayMode           = new CacheObject(1,   "",       "Relay mode");
+    addressCache.set('0x034F', bmvdata.relayMode);
+
     // Show/don't show certain parameters on BMV
     bmvdata.showVoltage         = new CacheObject(1,   "",       "Show voltage");
     addressCache.set('0xEEE0', bmvdata.showVoltage);
@@ -1185,7 +800,7 @@ function mapComponentsNew() {
     addressCache.set('0xEEE8', bmvdata.showPower);
 };
 
-mapComponents();
+mapBMVComponents();
 
 exports.bmvdata = bmvdata;
 exports.victronMap = victronMap;

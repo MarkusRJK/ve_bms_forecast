@@ -979,7 +979,7 @@ class ReceiverTransmitter {
         if (changedObjects.size)
             for (let i = 0; i < this.on.length; ++i) {
                 try {
-                    if (this.on[i] && changedObjects.size)
+                    if (this.on[i])
                         this.on[i](changedObjects, this.packageArrivalTime);
                 }
                 catch (err) {
