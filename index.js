@@ -39,24 +39,54 @@ const deviceCache = require('./device_cache.js');
 const CacheObject = require('./device_cache.js').CacheObject;
 
 log4js.configure({
-  appenders: {
-      everything: {
-          type: 'file',
-          filename: '/var/log/debug.log',
-          // layout basic: [2021-06-11T22:17:03.068]
-          layout: { type: 'basic'}
-      }
-  },
-  categories: {
-    default: { appenders: ['everything'], level: 'debug' }
-  }
+    appenders: {
+	stdout: {
+	    type: 'stdout',
+	    layout: {
+		type: 'pattern',
+		pattern: '%[ [%d{ISO8601}] [%5p] (stdout) - %m %]'
+	    }
+	},
+	stderr: {
+	    type: 'stderr',
+	    layout: {
+		type: 'pattern',
+		pattern: '%[ [%d{ISO8601}] [%5p] (stderr) - %m %]'
+	    }
+	},
+	_info: { type: 'logLevelFilter', appender: 'stdout', level: 'info', maxLevel: 'info'},
+	_error: { type: 'logLevelFilter', appender: 'stderr', level: 'error' },
+	varlog: {
+	    type: 'file',
+	    filename: '/var/log/debug.log',
+	    // layout basic: [2021-06-11T22:17:03.068]
+	    layout: { type: 'basic'}
+	}
+    },
+    categories: {
+	default: { appenders: ['varlog'], level: 'debug' },
+	silent:  { appenders: ['varlog'], level: 'error' },
+	error: { appenders: ['stderr'], level: 'error' },
+	filter: { appenders: ['_info', '_error'], level: 'info' },
+	console: { appenders: ['stdout'], level: 'info' }
+    }
 });
 
+// also type: categoryFilter exist
+// log4js.configure({
+//   appenders: {
+//     stdout: { type: 'stdout' },
+//     stderr: { type: 'stderr' },
+//     errors: { type: 'file', filename: 'errors.log' },
+//     fileFilter: { type: 'logLevelFilter', appender: 'errors', level: 'ERROR' },
+//     stderrFilter: { type: 'logLevelFilter', appender: 'stderr', level: 'ERROR' }
+//   },
+//   categories: {
+//     default: { appenders: [ 'fileFilter', 'stderrFilter', 'stdout' ], level: 'DEBUG' }
+//   }
+// });
 
-
-const logger = log4js.getLogger();
-// FIXME: use getLogger in other module rather than exporting it:
-module.exports.logger = logger; // export for inheriting classes
+const logger = log4js.getLogger('silent');
 
 var date = new Date();
 logger.debug('Service started at ' +
@@ -1916,7 +1946,8 @@ class VictronEnergyDevice {
     set_relay_mode(mode, priority, force) {
         logger.trace('VictronEnergyDevice::set relay mode');
 
-        if (Math.floor(parseInt(addressCache.get('0x034F').value)) === mode) return;
+        if (addressCache.get('0x034F').value &&
+	    parseInt(addressCache.get('0x034F').value) === mode) return;
         
         // FIXME: set priority 1 (bug: currently not working)
         if (mode === 0)
@@ -1944,10 +1975,14 @@ class VictronEnergyDevice {
         if (addressCache.get('0x034E').value !== null && currentMode === mode) return;
 
         // FIXME: set priority 1 (bug: currently not working)
-        if (mode === 0)
+        if (mode === 0) {
+	    logger.debug('VictronEnergyDevice::setRelay OFF');
             this.set('0x034E', '00', priority, force);
-        else
+	}
+        else {
+	    logger.debug('VictronEnergyDevice::setRelay ON');
             this.set('0x034E', '01', priority, force);
+	}
     }
 
     setAlarm() {
