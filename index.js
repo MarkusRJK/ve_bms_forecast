@@ -40,35 +40,35 @@ const CacheObject = require('./device_cache.js').CacheObject;
 
 log4js.configure({
     appenders: {
-	stdout: {
-	    type: 'stdout',
-	    layout: {
-		type: 'pattern',
-		pattern: '%[ [%d{ISO8601}] [%5p] (stdout) - %m %]'
-	    }
-	},
-	stderr: {
-	    type: 'stderr',
-	    layout: {
-		type: 'pattern',
-		pattern: '%[ [%d{ISO8601}] [%5p] (stderr) - %m %]'
-	    }
-	},
-	_info: { type: 'logLevelFilter', appender: 'stdout', level: 'info', maxLevel: 'info'},
-	_error: { type: 'logLevelFilter', appender: 'stderr', level: 'error' },
-	varlog: {
-	    type: 'file',
-	    filename: '/var/log/debug.log',
-	    // layout basic: [2021-06-11T22:17:03.068]
-	    layout: { type: 'basic'}
-	}
+        stdout: {
+            type: 'stdout',
+            layout: {
+                type: 'pattern',
+                pattern: '%[ [%d{ISO8601}] [%5p] (stdout) - %m %]'
+            }
+        },
+        stderr: {
+            type: 'stderr',
+            layout: {
+                type: 'pattern',
+                pattern: '%[ [%d{ISO8601}] [%5p] (stderr) - %m %]'
+            }
+        },
+        _info: { type: 'logLevelFilter', appender: 'stdout', level: 'info', maxLevel: 'info'},
+        _error: { type: 'logLevelFilter', appender: 'stderr', level: 'error' },
+        varlog: {
+            type: 'file',
+            filename: '/var/log/debug.log',
+            // layout basic: [2021-06-11T22:17:03.068]
+            layout: { type: 'basic'}
+        }
     },
     categories: {
-	default: { appenders: ['varlog'], level: 'debug' },
-	silent:  { appenders: ['varlog'], level: 'error' },
-	error: { appenders: ['stderr'], level: 'error' },
-	filter: { appenders: ['_info', '_error'], level: 'info' },
-	console: { appenders: ['stdout'], level: 'info' }
+        default: { appenders: ['varlog'], level: 'debug' },
+        silent:  { appenders: ['varlog'], level: 'error' },
+        error: { appenders: ['stderr'], level: 'error' },
+        filter: { appenders: ['_info', '_error'], level: 'info' },
+        console: { appenders: ['stdout'], level: 'info' }
     }
 });
 
@@ -86,7 +86,7 @@ log4js.configure({
 //   }
 // });
 
-const logger = log4js.getLogger('silent');
+const logger = log4js.getLogger();
 
 var date = new Date();
 logger.debug('Service started at ' +
@@ -1009,8 +1009,10 @@ class ReceiverTransmitter {
         if (changedObjects.size)
             for (let i = 0; i < this.on.length; ++i) {
                 try {
-                    if (this.on[i])
+                    if (this.on[i]) {
                         this.on[i](changedObjects, this.packageArrivalTime);
+                        //logger.debug('ReceiverTransmitter::updateValuesAndValueListeners - changedObjects');
+                    }
                 }
                 catch (err) {
                     logger.error('updateValuesAndValueListeners: ' + err);
@@ -1039,8 +1041,9 @@ class ReceiverTransmitter {
     //       whether it makes sense or not.
     registerListener(listener)
     {
-        logger.trace('ReceiverTransmitter::registerListener');
+        logger.debug('ReceiverTransmitter::registerListener'); // FIXME: revert to trace
         if (listener) this.on.push(listener);
+        else logger.error('failed to register listener: ' + typeof listener);
     }
 
     deregisterListener(listener)
@@ -1913,6 +1916,7 @@ class VictronEnergyDevice {
 
     getDeviceConfig(doSave)
     {
+        return; // FIXME: temporary disabled 
         logger.trace('VictronEnergyDevice::getDeviceConfig');
 
         if (doSave) {
@@ -1947,7 +1951,7 @@ class VictronEnergyDevice {
         logger.trace('VictronEnergyDevice::set relay mode');
 
         if (addressCache.get('0x034F').value &&
-	    parseInt(addressCache.get('0x034F').value) === mode) return;
+            parseInt(addressCache.get('0x034F').value) === mode) return;
         
         // FIXME: set priority 1 (bug: currently not working)
         if (mode === 0)
@@ -1975,14 +1979,15 @@ class VictronEnergyDevice {
         if (addressCache.get('0x034E').value !== null && currentMode === mode) return;
 
         // FIXME: set priority 1 (bug: currently not working)
+        // log as fatal like alarms to ensure they switching is always recorded 
         if (mode === 0) {
-	    logger.debug('VictronEnergyDevice::setRelay OFF');
+            logger.fatal('VictronEnergyDevice::setRelay OFF');
             this.set('0x034E', '00', priority, force);
-	}
+        }
         else {
-	    logger.debug('VictronEnergyDevice::setRelay ON');
+            logger.fatal('VictronEnergyDevice::setRelay ON');
             this.set('0x034E', '01', priority, force);
-	}
+        }
     }
 
     setAlarm() {
@@ -2052,8 +2057,12 @@ class VictronEnergyDevice {
     // \see   device_cache.js: function register(.) property formatted
     registerListener(property, listener)
     {
-        if (! property || ! listener) return;
-        logger.trace('VictronEnergyDevice::registerListener(' + property + ')');
+        logger.debug('VictronEnergyDevice::registerListener(' + property + ')'); // FIXME: revert to trace
+        if (! property || ! listener) {
+            logger.error('failed to register listener - property:' + property +
+                         ' , listener: ' + typeof listener);
+            return;
+        }
         if (property === 'ChangeList') this.rxtx.registerListener(listener);
         else if (property in bmvdata) {
             bmvdata[property].on.push(listener);
