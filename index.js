@@ -2,8 +2,6 @@
 // BMV
 //
 
-//'use strict';
-
 // TODO:
 // - cope with unplugged cable:
 //    events.js:183
@@ -1976,8 +1974,11 @@ class VictronEnergyDevice {
 
         let currentMode = 0;
         if (addressCache.get('0x034E').value === 'ON') currentMode = 1;
-        if (addressCache.get('0x034E').value !== null && currentMode === mode) return;
-
+        if (addressCache.get('0x034E').value !== null && currentMode === mode) {
+            if (mode === 1) logger.debug('VictronEnergyDevice::setRelay already ON');
+            else logger.debug('VictronEnergyDevice::setRelay already OFF');
+            return;
+        }
         // FIXME: set priority 1 (bug: currently not working)
         // log as fatal like alarms to ensure they switching is always recorded 
         if (mode === 0) {
@@ -2089,8 +2090,9 @@ class VictronEnergyDevice {
     hasListeners(property)
     {
         logger.trace('VictronEnergyDevice::hasListener');
+        if (! property) return false;
         if (property === 'ChangeList') return this.rxtx.on.length > 0;
-        else return (bmvdata[property].on.length > 0);
+        else return (property in bmvdata && bmvdata[property].on.length > 0);
     }
 
     update() {
