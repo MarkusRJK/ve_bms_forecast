@@ -26,6 +26,12 @@
 // - this.runOnFunction('FIXME:', addressCache...
 // - .on[null] or .on[null, null] from where???
 // - replace = {} by = new Map() and x[key] by x.set(key, ...)
+// - 84E03 (set relay ON/OFF): repeating the command may sent 84e03 to device, recieve repsonse,
+//   created response, clear timeout and then suddenly send the same command again
+// - several times seen "Device refused to set expected value for 84E03 (set Relay)
+// - Creating response for 4000051 received - what is that?? 4 == error??? 40000 is successful restart
+//   but log protocol ended up in "unwarranted command id: 4 received - ignored instead of
+//   recognizing the successful restart
 
 const Math = require('mathjs');
 const fs = require('fs');
@@ -961,24 +967,26 @@ class ReceiverTransmitter {
             // changeObj becomes non-null only if it is a number and sufficiently different
             // or if it is a string, object etc.
             if (typeof obj.newValue === 'number') {
-                const oldValue = obj.value * obj.nativeToUnitFactor;
-                const newValue = obj.newValue * obj.nativeToUnitFactor;
+                const ov = this.SIValues(obj);
                 //if (Math.abs(obj.value - obj.newValue) * obj.nativeToUnitFactor >= obj.delta)
-                if (Math.abs(oldValue - newValue) >= obj.delta)
+                if (Math.abs(ov.value - ov.newValue) >= obj.delta)
                 {
                     for (let i = 0; i < obj.on.length; ++i) {
                         try {
                             if (obj.on[i])
-                                obj.on[i](newValue, oldValue, this.packageArrivalTime, key);
+                                obj.on[i](ov.newValue, ov.value, this.packageArrivalTime, key);
                         }
                         catch (err) {
                             logger.error('runOnFunction(' + key + '): ' + err);
                         }
                     }
-                    changeObj = this.SIValues(obj);
+                    changeObj = ov;
                 }
             }
-            else changeObj = this.SIValues(obj);
+            else changeObj = {
+                value:    obj.value,
+                newValue: obj.newValue
+            };
         }
         return changeObj;
     }
@@ -997,31 +1005,37 @@ class ReceiverTransmitter {
         // go through all objects that change, i.e. those of map
         // which are changing values of BMV but also others.
 
-        // Parse 1. go through all cached data objects and call their on() functions
-        //          so that all on() functions can rely on newValue being != null and new
-        //          and value is the previous value
-        for (const[key, obj] of Object.entries(bmvdata)) {
-            const change = this.runOnFunction(key, obj);
-            if (change) changedObjects.set(key, change);
+        // go through all cached data objects and call their on() functions
+        // so that all on() functions can rely on newValue being != null and new
+        // and value is the previous value
+        bmvdata.isDirty = true;
+        let i = 0;
+        while (bmvdata.isDirty) {
+            for (const[key, obj] of Object.entries(bmvdata)) {
+                bmvdata.isDirty = false;
+                if (typeof obj !== 'boolean') {
+                    const change = this.runOnFunction(key, obj);
+                    if (change) changedObjects.set(key, change);
+                    // FIXME: if (obj) necessary???
+                    if (obj)
+                        this.updateCache(key);
+                }
+            }
+            if (i>0) logger.debug('updateValuesAndValueListeners: loop runOnFunctions ' + (++i) + ' changedObject.size ' + changedObjects.size);
         }
         if (changedObjects.size)
             for (let i = 0; i < this.on.length; ++i) {
                 try {
                     if (this.on[i]) {
                         this.on[i](changedObjects, this.packageArrivalTime);
-                        //logger.debug('ReceiverTransmitter::updateValuesAndValueListeners - changedObjects');
+                        // logger.debug('ReceiverTransmitter::updateValuesAndValueListeners - changedObjects');
+                        // logger.debug(JSON.stringify(changedObjects));
                     }
                 }
                 catch (err) {
                     logger.error('updateValuesAndValueListeners: ' + err);
                 }
             }
-
-        // Parse 2. go through all cached data objects and update value with newValue
-        //          and set newValue = null.
-        for (const[key, obj] of Object.entries(bmvdata)) {
-            if (obj) this.updateCache(key);
-        }
     }
 
     discardValues() {
@@ -1508,6 +1522,9 @@ class ReceiverTransmitter {
                                let newRetries = command.maxRetries;
                                if (responseId in that.responseMap)
                                    newRetries = that.responseMap[responseId].doRetry-1;
+                               // FIXME: const tid = setTimeout(...) should be done after
+                               //        adding responseId to responseMap but tid is
+                               //        needed for it!
                                that.responseMap[responseId] = {
                                    func:    resolve.bind(that),
                                    expect:  expectedResponse,
@@ -1973,10 +1990,13 @@ class VictronEnergyDevice {
         this.set_relay_mode(2, priority, force);
 
         let currentMode = 0;
+        // FIXME: currentMode must only be read from 0x034E if the command Q is quiet
+        //        i.e. has no entry for relay switching. Otherwise the cache can be dirty
+        //        (out of date)
         if (addressCache.get('0x034E').value === 'ON') currentMode = 1;
         if (addressCache.get('0x034E').value !== null && currentMode === mode) {
-            if (mode === 1) logger.debug('VictronEnergyDevice::setRelay already ON');
-            else logger.debug('VictronEnergyDevice::setRelay already OFF');
+            // if (mode === 1) logger.debug('VictronEnergyDevice::setRelay already ON');
+            // else logger.debug('VictronEnergyDevice::setRelay already OFF');
             return;
         }
         // FIXME: set priority 1 (bug: currently not working)

@@ -37,7 +37,8 @@ const logger = log4js.getLogger('silent');
 
 // bmvdata maps human readable keys to objects
 var bmvdata = {};
-// map's keys correspond to the keys used in the frequent 1-second-updates
+bmvdata.isDirty = false;
+// map's keys correspond to the keys used in the frequent 2-second-updates
 var victronMap = new Map();
 // addressCache's keys map the register's addresses to the objects
 var addressCache = new Map();
