@@ -896,7 +896,7 @@ class CommandMessageQ {
 };
 
 
-var cmdResponseTimeoutMS = 6000;
+var cmdResponseTimeoutMS = 24000; // 6000;
 var serialportFile       = "/dev/serial/by-id/usb-VictronEnergy_BV_VE_Direct_cable_VE1SUT80-if00-port0";
 var doRecord             = false;
 var recordFile           = "serial-test-data.log";
@@ -1053,7 +1053,7 @@ class ReceiverTransmitter {
     //       whether it makes sense or not.
     registerListener(listener)
     {
-        logger.debug('ReceiverTransmitter::registerListener'); // FIXME: revert to trace
+        logger.trace('ReceiverTransmitter::registerListener');
         if (listener) this.on.push(listener);
         else logger.error('failed to register listener: ' + typeof listener);
     }
@@ -1374,8 +1374,7 @@ class ReceiverTransmitter {
 
     // \brief restart is send straight to the port without queuing
     restart() {
-        logger.trace('ReceiverTransmitter::restart');
-        logger.debug('ReceiverTransmitter::restart'); //FIXME: temporary
+        logger.debug('ReceiverTransmitter::restart'); //FIXME: temporary debug, revert to trace
         let command = append_checksum(restartCommand);
         this.port.write(this.package(command)); // the command is fixed :64F\n
     }
@@ -1907,26 +1906,26 @@ class VictronEnergyDevice {
 
         logger.debug('deleting listeners');
         // FIXME all these values are null, not undefined, why?
-        if (bmvdata.capacity.value !== null)
-            this.registerListener('capacity',           null);
-        if (bmvdata.chargedVoltage.value !== null)
-            this.registerListener('chargedVoltage',     null);
-        if (bmvdata.tailCurrent.value !== null)
-            this.registerListener('tailCurrent',        null);
-        if (bmvdata.chargedDetectTime.value !== null)
-            this.registerListener('chargedDetectTime',  null);
-        if (bmvdata.chargeEfficiency.value !== null)
-            this.registerListener('chargeEfficiency',   null);
-        if (bmvdata.peukertCoefficient.value !== null)
-            this.registerListener('peukertCoefficient', null);
-        if (bmvdata.currentThreshold.value !== null)
-            this.registerListener('currentThreshold',   null);
-        if (bmvdata.timeToGoDelta.value !== null)
-            this.registerListener('timeToGoDelta',      null);
-        if (bmvdata.relayLowSOC.value !== null)
-            this.registerListener('relayLowSOC',        null);
-        if (bmvdata.relayLowSOCClear.value !== null)
-            this.registerListener('relayLowSOCClear',   null);
+        // if (bmvdata.capacity.value !== null)
+        //     this.registerListener('capacity',           null);
+        // if (bmvdata.chargedVoltage.value !== null)
+        //     this.registerListener('chargedVoltage',     null);
+        // if (bmvdata.tailCurrent.value !== null)
+        //     this.registerListener('tailCurrent',        null);
+        // if (bmvdata.chargedDetectTime.value !== null)
+        //     this.registerListener('chargedDetectTime',  null);
+        // if (bmvdata.chargeEfficiency.value !== null)
+        //     this.registerListener('chargeEfficiency',   null);
+        // if (bmvdata.peukertCoefficient.value !== null)
+        //     this.registerListener('peukertCoefficient', null);
+        // if (bmvdata.currentThreshold.value !== null)
+        //     this.registerListener('currentThreshold',   null);
+        // if (bmvdata.timeToGoDelta.value !== null)
+        //     this.registerListener('timeToGoDelta',      null);
+        // if (bmvdata.relayLowSOC.value !== null)
+        //     this.registerListener('relayLowSOC',        null);
+        // if (bmvdata.relayLowSOCClear.value !== null)
+        //     this.registerListener('relayLowSOCClear',   null);
     }
 
     getDeviceConfig(doSave)
@@ -1934,31 +1933,31 @@ class VictronEnergyDevice {
         return; // FIXME: temporary disabled 
         logger.trace('VictronEnergyDevice::getDeviceConfig');
 
-        if (doSave) {
-            // prepare for saving the data:
-            console.log('registering writeDeviceConfig listeners');
-            this.registerListener('capacity',           this.writeDeviceConfig.bind(this));
-            this.registerListener('chargedVoltage',     this.writeDeviceConfig.bind(this));
-            this.registerListener('tailCurrent',        this.writeDeviceConfig.bind(this));
-            this.registerListener('chargedDetectTime',  this.writeDeviceConfig.bind(this));
-            this.registerListener('chargeEfficiency',   this.writeDeviceConfig.bind(this));
-            this.registerListener('peukertCoefficient', this.writeDeviceConfig.bind(this));
-            this.registerListener('currentThreshold',   this.writeDeviceConfig.bind(this));
-            this.registerListener('timeToGoDelta',      this.writeDeviceConfig.bind(this));
-            this.registerListener('relayLowSOC',        this.writeDeviceConfig.bind(this));
-            this.registerListener('relayLowSOCClear',   this.writeDeviceConfig.bind(this));
-        }
+        // if (doSave) {
+        //     // prepare for saving the data:
+        //     console.log('registering writeDeviceConfig listeners');
+        //     this.registerListener('capacity',           this.writeDeviceConfig.bind(this));
+        //     this.registerListener('chargedVoltage',     this.writeDeviceConfig.bind(this));
+        //     this.registerListener('tailCurrent',        this.writeDeviceConfig.bind(this));
+        //     this.registerListener('chargedDetectTime',  this.writeDeviceConfig.bind(this));
+        //     this.registerListener('chargeEfficiency',   this.writeDeviceConfig.bind(this));
+        //     this.registerListener('peukertCoefficient', this.writeDeviceConfig.bind(this));
+        //     this.registerListener('currentThreshold',   this.writeDeviceConfig.bind(this));
+        //     this.registerListener('timeToGoDelta',      this.writeDeviceConfig.bind(this));
+        //     this.registerListener('relayLowSOC',        this.writeDeviceConfig.bind(this));
+        //     this.registerListener('relayLowSOCClear',   this.writeDeviceConfig.bind(this));
+        // }
 
-        this.getBatteryCapacity();
-        this.getChargedVoltage();
-        this.getTailCurrent();
-        this.getChargedDetectTime();
-        this.getChargeEfficiency();
-        this.getPeukertCoefficient();
-        this.getCurrentThreshold();
-        this.getTimeToGoDelta();
-        this.getRelayLowSOC();
-        this.getRelayLowSOCClear();
+        // this.getBatteryCapacity();
+        // this.getChargedVoltage();
+        // this.getTailCurrent();
+        // this.getChargedDetectTime();
+        // this.getChargeEfficiency();
+        // this.getPeukertCoefficient();
+        // this.getCurrentThreshold();
+        // this.getTimeToGoDelta();
+        // this.getRelayLowSOC();
+        // this.getRelayLowSOCClear();
     }
 
     // \param mode 0 = default, 1 = charge, 2 = remote
@@ -2078,13 +2077,28 @@ class VictronEnergyDevice {
     // \see   device_cache.js: function register(.) property formatted
     registerListener(property, listener)
     {
-        logger.debug('VictronEnergyDevice::registerListener(' + property + ')'); // FIXME: revert to trace
+        logger.trace('VictronEnergyDevice::registerListener(' + property + ')');
         if (! property || ! listener) {
             logger.error('failed to register listener - property:' + property +
                          ' , listener: ' + typeof listener);
             return;
         }
-        if (property === 'ChangeList') this.rxtx.registerListener(listener);
+        if (property === 'ChangeList') {
+            this.rxtx.registerListener(listener);
+            // create a changedMap and call listener for first initialization
+            let changedObjects = new Map();
+            for (const[key, obj] of Object.entries(bmvdata)) {
+                if (typeof obj !== 'boolean') {
+                    let newValue = (obj.newValue === null ? obj.value : obj.newValue);
+                    const change = {
+                        value:    obj.value,
+                        newValue: newValue
+                    };
+                    changedObjects.set(key, change);
+                }
+            }
+            listener(changedObjects, Date.now());
+        }
         else if (property in bmvdata) {
             bmvdata[property].on.push(listener);
             // send current value at registration as baseline
