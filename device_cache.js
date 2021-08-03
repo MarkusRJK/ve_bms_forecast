@@ -113,6 +113,7 @@ class CacheObject {
         // TODO: use typeof this.value in 'boolean', 'string', 'number'...
         if (this.value === null || this.nativeToUnitFactor === 0) return this.value;
         // use rounding
+        // FIXME: precision = 0 => 1.0/1.0 = 1.0 => l = 3 => toFixed(2) rather than toFixed(0)
         const div = 1.0 / this.precision;
         const l = String(div).length;
         let scaledToIntPrecision = Number(this.value * this.nativeToUnitFactor) + Number.EPSILON;
@@ -560,8 +561,9 @@ function registerComponent(key) {
 
     case 'H11':
         // BMV600, BMV700
+        // FIXME: precision: 0 not working in low/high volt alarms (particularly 0 is the issue)
         bmvdata.lowVoltageAlarms    = new CacheObject(1,     "",     "Low Volt. Alarms",
-                                                      { 'description': "Number of Low Main Voltage Alarms" });
+                                                      { 'description': "Number of Low Main Voltage Alarms", 'precision': -1 });
         victronMap.set('H11', bmvdata.lowVoltageAlarms);
         addressCache.set('0x030A', bmvdata.lowVoltageAlarms);
         break;
@@ -569,7 +571,7 @@ function registerComponent(key) {
     case 'H12':
         // BMV600, BMV700
         bmvdata.highVoltageAlarms   = new CacheObject(1,     "",     "High Volt. Alarms",
-                                                      { 'description': "Number of High Main Voltage Alarms" });
+                                                      { 'description': "Number of High Main Voltage Alarms", 'precision': -1 });
         victronMap.set('H12', bmvdata.highVoltageAlarms);
         addressCache.set('0x030B', bmvdata.highVoltageAlarms);
         break;

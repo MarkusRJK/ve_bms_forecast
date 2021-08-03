@@ -29,7 +29,7 @@
 // - 84E03 (set relay ON/OFF): repeating the command may sent 84e03 to device, recieve repsonse,
 //   created response, clear timeout and then suddenly send the same command again
 // - several times seen "Device refused to set expected value for 84E03 (set Relay)
-// - Creating response for 4000051 received - what is that?? 4 == error??? 40000 is successful restart
+// - Creating response for 4000051 received - what is that?? 4 == error??? 40000 is successful restart ==> after restart, wait till 40000 comes in!!! then continue firing commands! 
 //   but log protocol ended up in "unwarranted command id: 4 received - ignored instead of
 //   recognizing the successful restart
 
@@ -896,7 +896,12 @@ class CommandMessageQ {
 };
 
 
-var cmdResponseTimeoutMS = 24000; // 6000;
+// FIXME: after increasing cmdResponseTimeoutMS the following happend:
+//        kept sending 84E03 until "Device refused to set expected value..."
+//        right in the next line 84E03 was sent again and the response came
+//        remained unrecognized (relay already switched) and the code kept sending
+//        84E03
+var cmdResponseTimeoutMS = 6000;
 var serialportFile       = "/dev/serial/by-id/usb-VictronEnergy_BV_VE_Direct_cable_VE1SUT80-if00-port0";
 var doRecord             = false;
 var recordFile           = "serial-test-data.log";
@@ -1103,6 +1108,9 @@ class ReceiverTransmitter {
         }
         else if (id === '40000') // reply after restart
         {
+            // FIXME: response after restart is 4000051 - what is 51?
+            //        however I never saw a restart successful message in the log
+            //        instead unwarranted command id: 4 received!
             logger.debug('restart successful');
         }
         // FIXME: if framing error or unkownResponse happens several times
@@ -1265,7 +1273,7 @@ class ReceiverTransmitter {
             var cmdIndex;
             for (cmdIndex = 1; cmdIndex < cmdSplit.length; ++cmdIndex) {
                 const line = trimLF(cmdSplit[cmdIndex]);
-                logger.debug('Creating response for ' + line);
+                logger.debug('Received response ' + cmdIndex + ' - Creating response object for ' + line);
                 const r = new Response(line);
                 this.evaluate(r);
             }
