@@ -3,6 +3,7 @@
 //
 
 // TODO:
+// - install async-mutex and use in comms
 // - cope with unplugged cable:
 //    events.js:183
 //      throw er; // Unhandled 'error' event
@@ -1095,6 +1096,7 @@ class ReceiverTransmitter {
                 logger.error('Device refused to set expected value: ' +
                              this.responseMap[id].expect + '; received: ' +
                              response.getMessage().substring(0, this.responseMap[id].expect.length));
+                this.restart();
             }
             else { // process response and remove it from Q and responseMap
                 switch (this.responseMap[id].func(response)) {
